@@ -1,0 +1,48 @@
+# R files
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Python
+venv_proj/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Shiny
+rsconnect/
+.shiny_app_cache/
+
+# Data files (don't commit large data or user uploads)
+inst/app/data/uploads-cards-face/*.jpg
+inst/app/data/uploads-cards-verso/*.jpg
+inst/app/data/tracking.sqlite
+inst/app/data/tracking.sqlite-shm
+inst/app/data/tracking.sqlite-wal
+
+# Test outputs
+test_images/extracted/
+tests/manual/output/
+
+# Temporary files
+*.tmp
+*.log
+.Rcheck/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+
+# Cache
+.serena/cache/

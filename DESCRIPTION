@@ -1,0 +1,17 @@
+Package: Delcampe
+Title: Image processing for Delcampe posting
+Version: 0.0.0.9000
+Authors@R: 
+    person("Marius", "Tita", , "marius.tita81@gmail.com", role = "cre")
+Description: This app process images uploaded by an user. It uses LLM to extract meaning information and sends them to an API.
+License: MIT + file LICENSE
+Imports: 
+    bslib,
+    config,
+    golem,
+    reticulate,
+    shiny,
+    shinyjs
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.3.2

@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__serena__list_dir",
+      "Bash(find:*)",
+      "mcp__serena__get_symbols_overview",
+      "WebSearch",
+      "mcp__serena__search_for_pattern",
+      "mcp__serena__check_onboarding_performed",
+      "mcp__serena__onboarding",
+      "mcp__serena__find_file",
+      "mcp__serena__write_memory",
+      "mcp__serena__find_symbol",
+      "Bash(python:*)",
+      "Bash(venv_proj/Scripts/python.exe test_python_integration.py)",
+      "Bash(Rscript:*)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "serena"
+  ]
+}
