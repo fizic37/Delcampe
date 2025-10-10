@@ -15,12 +15,12 @@ app_ui <- function(request) {
     
     # Main application UI using Bootstrap navigation
     bslib::page_navbar(
-      title = "Delcampe Postal Card Processor",
+      title = "Delcampe Image Processor",
       theme = bslib::bs_theme(version = 5, bootswatch = "flatly"),
 
-      # FIXED: Single Stamps Tab with proper UI layout
+      # Postal Cards Tab - Main processing interface
       bslib::nav_panel(
-        "Stamps",
+        "Postal Cards",
         icon = icon("images"),
         
         # FIXED: Combined image output display section MOVED TO TOP
@@ -29,6 +29,15 @@ app_ui <- function(request) {
             width = 12,
             # This is where the combined image output will be displayed
             uiOutput("combined_image_output_display")
+          )
+        ),
+
+        # Export section (shown after processing) - appears below Face/Verso
+        fluidRow(
+          style = "margin-top: 20px;",
+          column(
+            width = 12,
+            uiOutput("export_section_display")
           )
         ),
         
@@ -64,14 +73,30 @@ app_ui <- function(request) {
               mod_postal_card_processor_ui("verso_processor", card_type = "verso")
             )
           )
-        ),
+        )
+      ),
 
-        # Combined Results Section (shown after processing)
-        fluidRow(
-          style = "margin-top: 20px;",
-          column(
-            width = 12,
-            uiOutput("combined_results_section")
+      # Stamps Tab - Placeholder for future feature
+      bslib::nav_panel(
+        title = "Stamps",
+        icon = icon("stamp"),
+        value = "stamps",
+        
+        bslib::page_fillable(
+          padding = 20,
+          bslib::card(
+            bslib::card_header(
+              "Stamps Feature",
+              style = "background-color: #52B788; color: white;"
+            ),
+            div(
+              style = "padding: 40px; text-align: center;",
+              icon("stamp", style = "font-size: 48px; color: #6c757d; margin-bottom: 20px;"),
+              h4("Coming Soon!", style = "color: #495057; margin-bottom: 15px;"),
+              p("The Stamps feature is under development.", style = "color: #6c757d; font-size: 16px;"),
+              p("This section will allow you to process stamp collections separately from postal cards.", 
+                style = "color: #6c757d; font-size: 14px; margin-top: 10px;")
+            )
           )
         )
       ),
@@ -221,6 +246,18 @@ golem_add_external_resources <- function() {
         object-fit: contain;
         border-radius: 5px;
         border: 1px solid #dee2e6;
+      }
+      
+      /* Enhanced Process Combined Images button hover effect */
+      #process_combined:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(82, 183, 136, 0.6) !important;
+        background: linear-gradient(135deg, #40916C 0%, #52B788 100%) !important;
+      }
+      
+      #process_combined:active {
+        transform: translateY(0px);
+        box-shadow: 0 2px 10px rgba(82, 183, 136, 0.3) !important;
       }
     ")),
     # FIXED: Include draggable lines CSS and JavaScript with correct Golem paths

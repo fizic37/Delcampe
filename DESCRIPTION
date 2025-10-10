@@ -6,9 +6,13 @@ Authors@R:
 Description: This app process images uploaded by an user. It uses LLM to extract meaning information and sends them to an API.
 License: MIT + file LICENSE
 Imports: 
+    base64enc,
     bslib,
     config,
     golem,
+    httr2,
+    later,
+    magick,
     reticulate,
     shiny,
     shinyjs

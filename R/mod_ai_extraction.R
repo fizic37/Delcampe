@@ -31,8 +31,11 @@ mod_ai_extraction_server <- function(id, image_path = reactive(NULL), session = 
       return(list(
         primary_provider = determine_primary_provider(config),
         fallback_provider = determine_fallback_provider(config),
+        default_model = config$default_model %||% "claude-sonnet-4-20250514",
         temperature = config$temperature %||% 0.7,
         max_tokens = config$max_tokens %||% 1000,
+        claude_api_key = config$claude_api_key,
+        openai_api_key = config$openai_api_key,
         claude_configured = !is.null(config$claude_api_key) && config$claude_api_key != "",
         openai_configured = !is.null(config$openai_api_key) && config$openai_api_key != ""
       ))
@@ -58,52 +61,88 @@ mod_ai_extraction_server <- function(id, image_path = reactive(NULL), session = 
     }
 
     # Extract text using multi-provider fallback
-    extract_with_ai_fallback <- function(image_path, extraction_type = "individual", card_count = 1) {
+    extract_with_ai_fallback <- function(image_path, extraction_type = "individual", 
+                                        card_count = 1, model_override = NULL) {
       ai_config <- get_ai_config()
 
-      # Try primary provider first
-      providers <- c(ai_config$primary_provider)
+      # Determine which model to use
+      if (!is.null(model_override)) {
+        # User selected a specific model
+        selected_model <- model_override
+        selected_provider <- get_provider_from_model(selected_model)
+      } else {
+        # Use default model from config
+        selected_model <- ai_config$default_model
+        selected_provider <- ai_config$primary_provider
+      }
 
-      # Add fallback if both are configured
-      if (ai_config$claude_configured && ai_config$openai_configured) {
+      # Try selected provider first
+      providers <- c(selected_provider)
+
+      # Add fallback if both are configured and we're not forcing a specific model
+      if (is.null(model_override) && ai_config$claude_configured && ai_config$openai_configured) {
         providers <- c(providers, ai_config$fallback_provider)
       }
 
       last_error <- NULL
 
       for (provider in providers) {
-        cat("Attempting extraction with provider:", provider, "\n")
+        cat("🤖 Attempting extraction with provider:", provider, "\n")
+
+        # Determine model for this provider
+        if (provider == selected_provider && !is.null(model_override)) {
+          model_to_use <- model_override
+        } else if (provider == "claude") {
+          model_to_use <- if (grepl("claude", selected_model, ignore.case = TRUE)) {
+            selected_model
+          } else {
+            "claude-sonnet-4-20250514"  # Default Claude model
+          }
+        } else {
+          model_to_use <- if (grepl("gpt", selected_model, ignore.case = TRUE)) {
+            selected_model
+          } else {
+            "gpt-4o"  # Default OpenAI model
+          }
+        }
 
         result <- tryCatch({
           switch(provider,
             "claude" = extract_with_claude(
               image_path = image_path,
+              model_name = model_to_use,
               extraction_type = extraction_type,
               card_count = card_count,
               temperature = ai_config$temperature,
-              max_tokens = ai_config$max_tokens
+              max_tokens = ai_config$max_tokens,
+              api_key = ai_config$claude_api_key
             ),
             "openai" = extract_with_openai(
               image_path = image_path,
+              model_name = model_to_use,
               extraction_type = extraction_type,
               card_count = card_count,
               temperature = ai_config$temperature,
-              max_tokens = ai_config$max_tokens
+              max_tokens = ai_config$max_tokens,
+              api_key = ai_config$openai_api_key
             )
           )
         }, error = function(e) {
-          cat("Provider", provider, "failed:", e$message, "\n")
+          cat("❌ Provider", provider, "failed:", e$message, "\n")
           last_error <<- e$message
           NULL
         })
 
         if (!is.null(result) && result$success) {
           result$provider_used <- provider
+          result$model_used <- model_to_use
+          cat("✅ Extraction successful with", provider, "using", model_to_use, "\n")
           return(result)
         }
       }
 
       # All providers failed
+      cat("❌ All providers failed\n")
       return(list(
         success = FALSE,
         title = "",
@@ -113,86 +152,114 @@ mod_ai_extraction_server <- function(id, image_path = reactive(NULL), session = 
       ))
     }
 
-    # Extract with Claude provider
-    extract_with_claude <- function(image_path, extraction_type, card_count, temperature, max_tokens) {
-      # Implementation would use actual Claude API
-      # For now, return simulated extraction
-
-      Sys.sleep(1) # Simulate API delay
-
-      # Simulate success/failure
-      success <- sample(c(TRUE, FALSE), 1, prob = c(0.85, 0.15))
-
-      if (success) {
-        base_name <- tools::file_path_sans_ext(basename(image_path))
-
-        if (extraction_type == "lot") {
-          title <- paste("Postal Card Lot -", card_count, "cards from", base_name)
-          description <- paste("Collection of", card_count, "vintage postal cards. Mixed themes and periods. Good overall condition. Extracted with Claude AI.")
-        } else {
-          title <- paste("Vintage Postal Card -", gsub("_", " ", base_name))
-          description <- "Vintage postal card in good condition. Interesting historical piece. Details extracted with Claude AI analysis."
-        }
-
-        return(list(
-          success = TRUE,
-          title = title,
-          description = description,
-          confidence_score = runif(1, 0.8, 0.95),
-          extraction_method = "claude_api"
-        ))
-      } else {
+    # Extract with Claude provider - REAL API IMPLEMENTATION
+    extract_with_claude <- function(image_path, model_name, extraction_type, 
+                                    card_count, temperature, max_tokens, api_key) {
+      
+      cat("📸 Calling Claude API with model:", model_name, "\n")
+      cat("   Image:", basename(image_path), "\n")
+      cat("   Type:", extraction_type, "\n")
+      
+      # Build prompt
+      prompt <- build_postal_card_prompt(extraction_type, card_count)
+      
+      # Call Claude API
+      api_result <- call_claude_api(
+        image_path = image_path,
+        model_name = model_name,
+        api_key = api_key,
+        prompt = prompt,
+        temperature = temperature,
+        max_tokens = max_tokens
+      )
+      
+      if (!api_result$success) {
+        cat("❌ Claude API error:", api_result$error, "\n")
         return(list(
           success = FALSE,
           title = "",
           description = "",
-          error_message = "Claude API extraction failed",
+          error_message = api_result$error,
           extraction_method = "claude_api"
         ))
       }
+      
+      # Parse response
+      cat("✅ Claude API success, parsing response...\n")
+      parsed <- parse_ai_response(api_result$content)
+      
+      # Log token usage if available
+      if (!is.null(api_result$usage)) {
+        cat("   Tokens used - Input:", api_result$usage$input_tokens, 
+            "Output:", api_result$usage$output_tokens, "\n")
+      }
+      
+      return(list(
+        success = TRUE,
+        title = parsed$title,
+        description = parsed$description,
+        raw_response = api_result$content,
+        model = api_result$model,
+        usage = api_result$usage,
+        extraction_method = "claude_api"
+      ))
     }
 
-    # Extract with OpenAI provider
-    extract_with_openai <- function(image_path, extraction_type, card_count, temperature, max_tokens) {
-      # Implementation would use actual OpenAI API
-      # For now, return simulated extraction
-
-      Sys.sleep(1.2) # Simulate slightly longer API delay
-
-      # Simulate success/failure
-      success <- sample(c(TRUE, FALSE), 1, prob = c(0.80, 0.20))
-
-      if (success) {
-        base_name <- tools::file_path_sans_ext(basename(image_path))
-
-        if (extraction_type == "lot") {
-          title <- paste("Postcard Collection -", card_count, "pieces from", base_name)
-          description <- paste("Set of", card_count, "historical postcards. Various themes and eras represented. Condition varies. Analyzed with GPT-4o.")
-        } else {
-          title <- paste("Historical Postcard -", gsub("_", " ", base_name))
-          description <- "Historical postcard with cultural significance. Well-preserved example. Text and imagery analyzed with OpenAI GPT-4o."
-        }
-
-        return(list(
-          success = TRUE,
-          title = title,
-          description = description,
-          confidence_score = runif(1, 0.75, 0.90),
-          extraction_method = "openai_api"
-        ))
-      } else {
+    # Extract with OpenAI provider - REAL API IMPLEMENTATION
+    extract_with_openai <- function(image_path, model_name, extraction_type, 
+                                    card_count, temperature, max_tokens, api_key) {
+      
+      cat("📸 Calling OpenAI API with model:", model_name, "\n")
+      cat("   Image:", basename(image_path), "\n")
+      cat("   Type:", extraction_type, "\n")
+      
+      # Build prompt
+      prompt <- build_postal_card_prompt(extraction_type, card_count)
+      
+      # Call OpenAI API
+      api_result <- call_openai_api(
+        image_path = image_path,
+        model_name = model_name,
+        api_key = api_key,
+        prompt = prompt,
+        temperature = temperature,
+        max_tokens = max_tokens
+      )
+      
+      if (!api_result$success) {
+        cat("❌ OpenAI API error:", api_result$error, "\n")
         return(list(
           success = FALSE,
           title = "",
           description = "",
-          error_message = "OpenAI API extraction failed",
+          error_message = api_result$error,
           extraction_method = "openai_api"
         ))
       }
+      
+      # Parse response
+      cat("✅ OpenAI API success, parsing response...\n")
+      parsed <- parse_ai_response(api_result$content)
+      
+      # Log token usage if available
+      if (!is.null(api_result$usage)) {
+        cat("   Tokens used - Prompt:", api_result$usage$prompt_tokens, 
+            "Completion:", api_result$usage$completion_tokens, "\n")
+      }
+      
+      return(list(
+        success = TRUE,
+        title = parsed$title,
+        description = parsed$description,
+        raw_response = api_result$content,
+        model = api_result$model,
+        usage = api_result$usage,
+        extraction_method = "openai_api"
+      ))
     }
 
     # Main extraction interface
-    perform_extraction <- function(extraction_type = "individual", card_count = 1) {
+    perform_extraction <- function(extraction_type = "individual", card_count = 1, model_override = NULL) {
       current_path <- image_path()
       if (is.null(current_path)) {
         return(list(
@@ -213,13 +280,29 @@ mod_ai_extraction_server <- function(id, image_path = reactive(NULL), session = 
         ))
       }
 
+      # Check if at least one provider is configured
+      ai_config <- get_ai_config()
+      if (!ai_config$claude_configured && !ai_config$openai_configured) {
+        return(list(
+          success = FALSE,
+          error_message = "No AI providers configured. Please add API keys in Settings.",
+          title = "",
+          description = ""
+        ))
+      }
+
       # Set extracting state
       rv$extracting <- TRUE
 
       # Show progress notification
       if (!is.null(notification_session)) {
+        model_display <- if (!is.null(model_override)) {
+          paste("using", get_model_display_name(model_override))
+        } else {
+          ""
+        }
         showNotification(
-          "Starting AI extraction...",
+          paste("Starting AI extraction", model_display, "..."),
           type = "message",
           duration = 2,
           session = notification_session
@@ -230,7 +313,8 @@ mod_ai_extraction_server <- function(id, image_path = reactive(NULL), session = 
       result <- extract_with_ai_fallback(
         image_path = current_path,
         extraction_type = extraction_type,
-        card_count = card_count
+        card_count = card_count,
+        model_override = model_override
       )
 
       # Update reactive values
@@ -252,15 +336,16 @@ mod_ai_extraction_server <- function(id, image_path = reactive(NULL), session = 
       # Show completion notification
       if (!is.null(notification_session)) {
         if (result$success) {
+          model_used <- get_model_display_name(result$model_used %||% "Unknown")
           showNotification(
-            paste("AI extraction completed using", result$provider_used),
+            paste("✅ AI extraction completed using", model_used),
             type = "message",
             duration = 3,
             session = notification_session
           )
         } else {
           showNotification(
-            paste("AI extraction failed:", result$error_message),
+            paste("❌ AI extraction failed:", result$error_message),
             type = "error",
             duration = 5,
             session = notification_session
@@ -289,17 +374,11 @@ mod_ai_extraction_server <- function(id, image_path = reactive(NULL), session = 
         ))
       }
 
-      # Simulate connection test
-      Sys.sleep(0.5)
-      success <- sample(c(TRUE, FALSE), 1, prob = c(0.9, 0.1))
-
+      # For now, just check if key exists
+      # TODO: Implement actual test API call
       return(list(
-        success = success,
-        message = if (success) {
-          paste(provider, "connection successful")
-        } else {
-          paste(provider, "connection failed - please check API key")
-        }
+        success = TRUE,
+        message = paste(provider, "API key is configured (connection test not yet implemented)")
       ))
     }
 

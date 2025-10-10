@@ -85,14 +85,14 @@ mod_postal_card_processor_ui <- function(id, card_type = "face") {
       fluidRow(
         style = "margin-top: 20px;",
         column(
-          width = 4,
+          width = 7,
           bslib::card(
             header = bslib::card_header(paste("Uploaded", card_type, "image")),
             uiOutput(ns("images_panel"))
           )
         ),
         column(
-          width = 8,
+          width = 5,
           bslib::card(
             header = bslib::card_header(paste("Extracted", card_type, "images")),
             uiOutput(ns("extracted_cards_display"))
@@ -143,7 +143,8 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       current_grid_rows = NULL,
       current_grid_cols = NULL,
       extracted_paths_web = NULL,
-      is_extracting = FALSE  # Track extraction state to prevent unwanted observer triggers
+      is_extracting = FALSE,  # Track extraction state to prevent unwanted observer triggers
+      reset_in_progress = FALSE  # NEW: Track reset to prevent upload observer from running
     )
     
     # ---- Python setup ----
@@ -169,6 +170,12 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
     # ---- Image upload handling ----
     observeEvent(input$image_upload, {
       cat("\n🔥🔥🔥 UPLOAD OBSERVER TRIGGERED [", toupper(card_type), "] 🔥🔥🔥\n")
+      
+      # CRITICAL: Skip if reset is in progress
+      if (isTRUE(rv$reset_in_progress)) {
+        cat("\n⚠️ SKIPPING upload observer [", toupper(card_type), "] - reset in progress\n")
+        return()
+      }
       
       # CRITICAL: Skip if extraction is in progress to prevent cascade
       if (isTRUE(rv$is_extracting)) {
@@ -223,19 +230,44 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       if (python_sourced && exists("detect_grid_layout")) {
         cat("   📞 CALLING detect_grid_layout() from upload observer\n")
         cat("   📂 Image path:", rv$image_path_original, "\n")
+        
+        # FILE VERIFICATION: Ensure file is ready before calling Python
+        if (!file.exists(rv$image_path_original) || file.size(rv$image_path_original) == 0) {
+          cat("   ⚠️ File not ready, waiting 50ms...\n")
+          Sys.sleep(0.05)
+        }
+        
         cat("   📊 File exists:", file.exists(rv$image_path_original), "\n")
         cat("   📏 File size:", file.size(rv$image_path_original), "bytes\n")
         
-        py_results <- tryCatch({
-          result <- detect_grid_layout(rv$image_path_original)
-          cat("   ✅ Python call successful\n")
-          cat("   📐 Result structure:", names(result), "\n")
-          result
-        }, error = function(e) {
-          cat("   ❌ Python detection error:", e$message, "\n")
-          cat("   Stack trace:", paste(capture.output(traceback()), collapse="\n"), "\n")
-          NULL
-        })
+        # RETRY LOGIC: Handle transient file system issues
+        max_attempts <- 3
+        attempt <- 1
+        py_results <- NULL
+        
+        while (is.null(py_results) && attempt <= max_attempts) {
+          if (attempt > 1) {
+            cat("   🔄 Retry attempt", attempt, "after 100ms delay...\n")
+            Sys.sleep(0.1)
+          }
+          
+          py_results <- tryCatch({
+            result <- detect_grid_layout(rv$image_path_original)
+            cat("   ✅ Python call successful on attempt", attempt, "\n")
+            cat("   📐 Result structure:", names(result), "\n")
+            result
+          }, error = function(e) {
+            cat("   ❌ Attempt", attempt, "failed:", e$message, "\n")
+            if (attempt < max_attempts) {
+              cat("   Will retry...\n")
+            } else {
+              cat("   All attempts failed. Stack trace:", paste(capture.output(traceback()), collapse="\n"), "\n")
+            }
+            NULL
+          })
+          
+          attempt <- attempt + 1
+        }
         
         cat("   🔬 py_results is NULL:", is.null(py_results), "\n")
         
@@ -449,7 +481,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       if (is.null(rv$image_url_display)) {
         cat("   ⚠️ Showing placeholder message\n")
         return(div(
-          style = "width:100%; height:400px; display:flex; align-items:center; justify-content:center; color:#aaa; font-style:italic;",
+          style = "width:100%; height:500px; display:flex; align-items:center; justify-content:center; color:#aaa; font-style:italic;",
           paste("Upload a", card_type, "image to start.")
         ))
       }
@@ -460,7 +492,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       tags$div(
         id = ns("grid_ui_wrapper"),
         `data-draggrid` = "true", 
-        style = "position:relative; width:100%; height:400px; overflow:visible; border:1px solid #eee; margin-bottom:8px; background-color: #f5f5f5;",
+        style = "position:relative; width:100%; height:500px; overflow:visible; border:1px solid #eee; margin-bottom:8px; background-color: #f5f5f5;",
         uiOutput(ns("image_with_draggable_grid"))
       )
     })
@@ -527,7 +559,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
         tags$img(
           id = ns("preview_image"),
           src = img_src_with_nonce,
-          style = "display:block; position:absolute; top:0; left:0; width:100%; height:100%; object-fit:contain; pointer-events:none; z-index:5;",
+          style = "display:block; position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); max-width:100%; max-height:500px; width:auto; height:auto; object-fit:contain; pointer-events:none; z-index:5;",
           `data-original-width` = rv$image_dims_original[1],
           `data-original-height` = rv$image_dims_original[2],
           onload = "console.log('✅ Image loaded successfully!');",
@@ -625,11 +657,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           on_extraction_complete(length(rv$extracted_paths_web), py_out_dir)
         }
         
-        showNotification(
-          paste("Extracted", length(rv$extracted_paths_web), card_type, "cards"),
-          type = "message",
-          duration = 3
-        )
+        # No success notification - extracted cards are visible in UI
       } else {
         cat("❌ Extraction failed\n")
         showNotification("Extraction failed. Check console.", type = "error", duration = 5)
@@ -715,7 +743,42 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           NULL
         }
       }),
-      get_extracted_count = reactive(length(rv$extracted_paths_web %||% c()))
+      get_extracted_count = reactive(length(rv$extracted_paths_web %||% c())),
+      
+      # NEW: Reset function for "Start Over" functionality
+      reset_module = function() {
+        cat("\n🔄 RESETTING MODULE [", toupper(card_type), "]\n")
+        
+        # Set flag to prevent upload observer from triggering
+        rv$reset_in_progress <- TRUE
+        
+        # Hide UI controls
+        shinyjs::hide("rows_control")
+        shinyjs::hide("cols_control")
+        shinyjs::hide("extract_control")
+        
+        # Clear all reactive values
+        rv$image_path_original <- NULL
+        rv$image_url_display <- NULL
+        rv$image_dims_original <- NULL
+        rv$h_boundaries <- numeric(0)
+        rv$v_boundaries <- numeric(0)
+        rv$boundaries_manually_adjusted <- FALSE
+        rv$force_grid_redraw <- 0
+        rv$current_grid_rows <- NULL
+        rv$current_grid_cols <- NULL
+        rv$extracted_paths_web <- NULL
+        rv$is_extracting <- FALSE
+        
+        # Reset file input (will trigger observer, but flag prevents execution)
+        shinyjs::reset("image_upload")
+        
+        # Use simple Sys.sleep to let the reset complete, then clear flag
+        Sys.sleep(0.1)
+        rv$reset_in_progress <- FALSE
+        
+        cat("   ✅ Module reset complete\n")
+      }
     ))
   })
   

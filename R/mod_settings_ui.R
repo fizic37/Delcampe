@@ -140,13 +140,19 @@ render_admin_ui <- function(ns) {
                     ns("default_model"),
                     label = NULL,
                     choices = list(
-                      "Claude Sonnet 4" = "claude-sonnet-4-20250514",
-                      "GPT-4o" = "gpt-4o",
-                      "GPT-4o Mini" = "gpt-4o-mini",
-                      "GPT-4.1" = "gpt-4.1",
-                      "GPT-4.1 Mini" = "gpt-4.1-mini"
+                      "Anthropic" = list(
+                        "Claude Sonnet 4.5 (Recommended)" = "claude-sonnet-4-5-20250929",
+                        "Claude Sonnet 4" = "claude-sonnet-4-20250514",
+                        "Claude Opus 4.1 (Most Capable)" = "claude-opus-4-1-20250514",
+                        "Claude Opus 4" = "claude-opus-4-20250514"
+                      ),
+                      "OpenAI" = list(
+                        "GPT-4o (Fast)" = "gpt-4o",
+                        "GPT-4o Mini (Economical)" = "gpt-4o-mini",
+                        "GPT-4 Turbo" = "gpt-4-turbo"
+                      )
                     ),
-                    selected = "claude-sonnet-4-20250514"
+                    selected = "claude-sonnet-4-5-20250929"
                   )
                 ),
                 
@@ -254,13 +260,13 @@ render_admin_ui <- function(ns) {
                   style = "margin-top: 20px; padding: 10px; background-color: #f8f9fa; border-radius: 6px; border-left: 3px solid #28a745;",
                   div(
                     style = "display: flex; align-items: start;",
-                    icon("info-circle", style = "color: #28a745; margin-right: 8px; margin-top: 2px;"),
+                    icon("lock", style = "color: #28a745; margin-right: 8px; margin-top: 2px;"),
                     div(
                       tags$small(
-                        tags$strong("API Key Detection:"), br(),
-                        "• Keys are auto-detected from .Renviron file", br(),
-                        "• You can also enter keys manually here", br(),
-                        "• .Renviron keys take priority over manual entry",
+                        tags$strong("Secure Storage:"), br(),
+                        "• API keys are stored locally in data/llm_config.rds", br(),
+                        "• Keys are never sent to external servers", br(),
+                        "• Only displayed as truncated values after saving",
                         style = "color: #495057;"
                       )
                     )
@@ -411,11 +417,14 @@ render_user_ui <- function(ns) {
 # Helper function to safely get model name
 get_model_display_name <- function(model_id) {
   model_names <- list(
+    "claude-sonnet-4-5-20250929" = "Claude Sonnet 4.5",
     "claude-sonnet-4-20250514" = "Claude Sonnet 4",
+    "claude-opus-4-1-20250514" = "Claude Opus 4.1",
+    "claude-opus-4-20250514" = "Claude Opus 4",
     "gpt-4o" = "GPT-4o",
     "gpt-4o-mini" = "GPT-4o Mini",
-    "gpt-4.1" = "GPT-4.1",
-    "gpt-4.1-mini" = "GPT-4.1 Mini"
+    "gpt-4-turbo" = "GPT-4 Turbo",
+    "gpt-4" = "GPT-4"
   )
   
   # Safely get model name with fallback

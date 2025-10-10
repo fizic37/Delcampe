@@ -4,20 +4,6 @@
 #' @noRd
 NULL
 
-#' Get LLM Configuration
-#' @description Returns default LLM configuration if no settings module available
-#' @noRd
-get_llm_config <- function() {
-  # Default configuration - will be overridden by settings module
-  return(list(
-    default_model = "claude-sonnet-4-20250514",
-    temperature = 0.7,
-    max_tokens = 1000,
-    claude_api_key = Sys.getenv("CLAUDE_API_KEY", ""),
-    openai_api_key = Sys.getenv("OPENAI_API_KEY", "")
-  ))
-}
-
 #' Safe Session ID
 #' @description Get a safe session ID for database operations
 #' @param session Shiny session object

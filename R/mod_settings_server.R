@@ -58,13 +58,13 @@ mod_settings_server <- function(id, current_user) {
                            placeholder = "Key detected from .Renviron file")
             llm_config$claude_configured <- TRUE
           } else if (!is.null(config$claude_api_key) && is.character(config$claude_api_key) && config$claude_api_key != "") {
-            llm_config$claude_api_key <- config$claude_api_key
+            llm_config$claude_api_key <- config$claude_api_key  # Store FULL key
             display_key <- if(nchar(config$claude_api_key) > 8) {
               paste0(substr(config$claude_api_key, 1, 8), "...")
             } else {
               ""
             }
-            updateTextInput(session, "claude_api_key", value = display_key)
+            updateTextInput(session, "claude_api_key", value = display_key, placeholder = "Key is configured (hidden for security)")
             llm_config$claude_configured <- TRUE
           }
           
@@ -247,20 +247,69 @@ mod_settings_server <- function(id, current_user) {
       temp <- input$temperature %||% 0
       tokens <- input$max_tokens %||% 1000
       
-      # Handle API keys - use current values or from inputs
-      claude_key <- if (grepl("Auto-detected", input$claude_api_key %||% "")) {
-        llm_config$claude_api_key  # Use existing key
-      } else {
-        input$claude_api_key %||% ""
+      # CRITICAL FIX: Load existing keys from file first
+      existing_keys <- list(
+        claude = "",
+        openai = ""
+      )
+      
+      config_file <- "data/llm_config.rds"
+      if (file.exists(config_file)) {
+        tryCatch({
+          saved_config <- readRDS(config_file)
+          if (!is.null(saved_config$claude_api_key) && nchar(saved_config$claude_api_key) > 0) {
+            existing_keys$claude <- saved_config$claude_api_key
+          }
+          if (!is.null(saved_config$openai_api_key) && nchar(saved_config$openai_api_key) > 0) {
+            existing_keys$openai <- saved_config$openai_api_key
+          }
+          cat("Loaded existing keys from file:\n")
+          cat("  Claude key length:", nchar(existing_keys$claude), "\n")
+          cat("  OpenAI key length:", nchar(existing_keys$openai), "\n")
+        }, error = function(e) {
+          cat("Error loading existing config:", e$message, "\n")
+        })
       }
       
-      openai_key <- if (grepl("Auto-detected", input$openai_api_key %||% "")) {
-        llm_config$openai_api_key  # Use existing key
+      # Handle API keys - FIXED LOGIC
+      # If the input shows a masked key (contains "...") or auto-detected text, use the stored full key from FILE
+      # Otherwise, use the new key entered by the user
+      claude_key_input <- input$claude_api_key %||% ""
+      claude_key <- if (grepl("Auto-detected|\\.\\.\\.", claude_key_input)) {
+        cat("Claude: Using existing key from file (masked/auto-detected in input)\n")
+        existing_keys$claude  # Use stored FULL key from FILE
+      } else if (nchar(claude_key_input) >= 20) {
+        cat("Claude: Using new key from input\n")
+        claude_key_input  # New full key entered
+      } else if (nchar(claude_key_input) == 0) {
+        cat("Claude: Empty input, keeping existing key\n")
+        existing_keys$claude
       } else {
-        input$openai_api_key %||% ""
+        cat("Claude: Input too short, keeping existing key\n")
+        existing_keys$claude
+      }
+      
+      openai_key_input <- input$openai_api_key %||% ""
+      openai_key <- if (grepl("Auto-detected|\\.\\.\\.", openai_key_input)) {
+        cat("OpenAI: Using existing key from file (masked/auto-detected in input)\n")
+        existing_keys$openai  # Use stored FULL key from FILE
+      } else if (nchar(openai_key_input) >= 20) {
+        cat("OpenAI: Using new key from input\n")
+        openai_key_input  # New full key entered
+      } else if (nchar(openai_key_input) == 0) {
+        cat("OpenAI: Empty input, keeping existing key\n")
+        existing_keys$openai
+      } else {
+        cat("OpenAI: Input too short, keeping existing key\n")
+        existing_keys$openai
       }
       
       cat("Calling save_llm_config_simple...\n")
+      cat("  Model:", model, "\n")
+      cat("  Temp:", temp, "\n")
+      cat("  Tokens:", tokens, "\n")
+      cat("  Claude key length:", nchar(claude_key), "\n")
+      cat("  OpenAI key length:", nchar(openai_key), "\n")
       
       # Use the simplified save function
       result <- save_llm_config_simple(

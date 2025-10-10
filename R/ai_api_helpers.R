@@ -1,0 +1,751 @@
+#' AI API Helper Functions
+#'
+#' @description Functions for calling Claude and OpenAI APIs for image analysis
+#' @noRd
+NULL
+
+#' Get LLM Configuration
+#' 
+#' @description Reads LLM configuration from data/llm_config.rds with fallback to environment variables
+#' @return List with configuration including API keys, default model, temperature, and max_tokens
+#' @noRd
+get_llm_config <- function() {
+  config_file <- "data/llm_config.rds"
+  
+  # Default configuration
+  config <- list(
+    default_model = "claude-sonnet-4-5-20250929",
+    temperature = 0.0,
+    max_tokens = 1000,
+    claude_api_key = "",
+    openai_api_key = "",
+    last_updated = NULL
+  )
+  
+  cat("\n=== get_llm_config() called ===\n")
+  cat("Config file path:", config_file, "\n")
+  cat("File exists:", file.exists(config_file), "\n")
+  cat("Working directory:", getwd(), "\n")
+  
+  # Try to load from file
+  if (file.exists(config_file)) {
+    tryCatch({
+      saved_config <- readRDS(config_file)
+      cat("Successfully read config file\n")
+      cat("Keys in config:", paste(names(saved_config), collapse = ", "), "\n")
+      
+      # Merge saved config with defaults
+      for (key in names(saved_config)) {
+        config[[key]] <- saved_config[[key]]
+      }
+      
+      # Debug: Show key lengths
+      claude_key <- if (is.null(config$claude_api_key) || config$claude_api_key == "") "" else config$claude_api_key
+      openai_key <- if (is.null(config$openai_api_key) || config$openai_api_key == "") "" else config$openai_api_key
+      cat("Claude key length from file:", nchar(claude_key), "\n")
+      cat("OpenAI key length from file:", nchar(openai_key), "\n")
+    }, error = function(e) {
+      cat("ERROR reading config file:", e$message, "\n")
+    })
+  } else {
+    cat("Config file does not exist, using defaults\n")
+  }
+  
+  # Final debug output
+  claude_key_final <- if (is.null(config$claude_api_key) || config$claude_api_key == "") "" else config$claude_api_key
+  openai_key_final <- if (is.null(config$openai_api_key) || config$openai_api_key == "") "" else config$openai_api_key
+  cat("Final Claude key length:", nchar(claude_key_final), "\n")
+  cat("Final OpenAI key length:", nchar(openai_key_final), "\n")
+  cat("=== get_llm_config() complete ===\n\n")
+  
+  return(config)
+}
+
+#' Compress Image if Needed
+#' 
+#' @param image_path Path to the image file
+#' @param max_size_mb Maximum file size in MB (default 4.5 to leave buffer)
+#' @return Path to compressed image (or original if small enough)
+#' @noRd
+compress_image_if_needed <- function(image_path, max_size_mb = 4.5) {
+  
+  file_size_mb <- file.info(image_path)$size / (1024 * 1024)
+  
+  if (file_size_mb <= max_size_mb) {
+    cat("Image size OK:", round(file_size_mb, 2), "MB\n")
+    return(image_path)
+  }
+  
+  cat("Image too large:", round(file_size_mb, 2), "MB - compressing...\n")
+  
+  # Don't show notifications - they fail in later::later() context
+  
+  tryCatch({
+    # Load image using magick
+    img <- magick::image_read(image_path)
+    
+    # Get original dimensions
+    info <- magick::image_info(img)
+    original_width <- info$width
+    original_height <- info$height
+    
+    # Calculate scale factor to get under size limit
+    # Start with 80% quality and scale down if needed
+    scale_factor <- sqrt(max_size_mb / file_size_mb) * 0.9
+    new_width <- as.integer(original_width * scale_factor)
+    new_height <- as.integer(original_height * scale_factor)
+    
+    cat("Resizing from", original_width, "x", original_height, 
+        "to", new_width, "x", new_height, "\n")
+    
+    # Resize image
+    img_resized <- magick::image_resize(img, paste0(new_width, "x", new_height))
+    
+    # Save to temporary file with compression
+    temp_path <- tempfile(fileext = ".jpg")
+    magick::image_write(img_resized, temp_path, format = "jpg", quality = 80)
+    
+    # Check new size
+    new_size_mb <- file.info(temp_path)$size / (1024 * 1024)
+    cat("Compressed to:", round(new_size_mb, 2), "MB\n")
+    
+    # If still too large, try with lower quality
+    if (new_size_mb > max_size_mb) {
+      cat("Still too large, reducing quality...\n")
+      magick::image_write(img_resized, temp_path, format = "jpg", quality = 60)
+      new_size_mb <- file.info(temp_path)$size / (1024 * 1024)
+      cat("Final size:", round(new_size_mb, 2), "MB\n")
+    }
+    
+    return(temp_path)
+    
+  }, error = function(e) {
+    cat("Error compressing image:", e$message, "\n")
+    cat("Returning original image (may fail API call)\n")
+    return(image_path)
+  })
+}
+
+#' Call Claude API for Image Analysis
+#' 
+#' @param image_path Path to the image file
+#' @param model_name Claude model name (e.g., "claude-sonnet-4-20250514")
+#' @param api_key Claude API key
+#' @param prompt Text prompt for image analysis
+#' @param temperature Sampling temperature (0-1)
+#' @param max_tokens Maximum tokens in response
+#' 
+#' @return List with success, content, and error information
+#' @noRd
+call_claude_api <- function(image_path, model_name, api_key, prompt, temperature = 0.7, max_tokens = 1000) {
+  
+  # Validate inputs
+  if (is.null(api_key) || api_key == "") {
+    return(list(
+      success = FALSE,
+      content = NULL,
+      error = "Claude API key not configured"
+    ))
+  }
+  
+  if (!file.exists(image_path)) {
+    return(list(
+      success = FALSE,
+      content = NULL,
+      error = paste("Image file not found:", image_path)
+    ))
+  }
+  
+  tryCatch({
+    # Compress image if needed (Claude has 5 MB limit)
+    processed_image_path <- compress_image_if_needed(image_path, max_size_mb = 4.5)
+    
+    # Read and encode image as base64
+    image_data <- readBin(processed_image_path, "raw", file.info(processed_image_path)$size)
+    image_base64 <- base64enc::base64encode(image_data)
+    
+    # Clean up temporary compressed file if created
+    if (processed_image_path != image_path && file.exists(processed_image_path)) {
+      unlink(processed_image_path)
+    }
+    
+    # Determine media type from file extension
+    ext <- tolower(tools::file_ext(image_path))
+    media_type <- switch(ext,
+      "jpg" = "image/jpeg",
+      "jpeg" = "image/jpeg",
+      "png" = "image/png",
+      "gif" = "image/gif",
+      "webp" = "image/webp",
+      "image/jpeg" # default
+    )
+    
+    # Construct request body
+    body <- list(
+      model = model_name,
+      max_tokens = as.integer(max_tokens),
+      temperature = as.numeric(temperature),
+      messages = list(
+        list(
+          role = "user",
+          content = list(
+            list(
+              type = "image",
+              source = list(
+                type = "base64",
+                media_type = media_type,
+                data = image_base64
+              )
+            ),
+            list(
+              type = "text",
+              text = prompt
+            )
+          )
+        )
+      )
+    )
+    
+    # Make API request
+    response <- httr2::request("https://api.anthropic.com/v1/messages") %>%
+      httr2::req_headers(
+        "x-api-key" = api_key,
+        "anthropic-version" = "2023-06-01",
+        "content-type" = "application/json"
+      ) %>%
+      httr2::req_body_json(body) %>%
+      httr2::req_timeout(60) %>%
+      httr2::req_retry(max_tries = 2) %>%
+      httr2::req_error(is_error = function(resp) FALSE) %>%
+      httr2::req_perform()
+    
+    # Check response status
+    if (httr2::resp_status(response) != 200) {
+      error_body <- httr2::resp_body_json(response)
+      error_msg <- if (!is.null(error_body$error$message)) {
+        error_body$error$message
+      } else {
+        paste("API error with status", httr2::resp_status(response))
+      }
+      
+      return(list(
+        success = FALSE,
+        content = NULL,
+        error = error_msg,
+        status_code = httr2::resp_status(response)
+      ))
+    }
+    
+    # Parse response
+    result <- httr2::resp_body_json(response)
+    
+    # Extract text content
+    if (!is.null(result$content) && length(result$content) > 0) {
+      text_content <- result$content[[1]]$text
+      
+      return(list(
+        success = TRUE,
+        content = text_content,
+        model = result$model,
+        usage = result$usage,
+        error = NULL
+      ))
+    } else {
+      return(list(
+        success = FALSE,
+        content = NULL,
+        error = "No content in API response"
+      ))
+    }
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      content = NULL,
+      error = paste("Claude API call failed:", e$message)
+    ))
+  })
+}
+
+#' Call OpenAI API for Image Analysis
+#' 
+#' @param image_path Path to the image file
+#' @param model_name OpenAI model name (e.g., "gpt-4o")
+#' @param api_key OpenAI API key
+#' @param prompt Text prompt for image analysis
+#' @param temperature Sampling temperature (0-1)
+#' @param max_tokens Maximum tokens in response
+#' 
+#' @return List with success, content, and error information
+#' @noRd
+call_openai_api <- function(image_path, model_name, api_key, prompt, temperature = 0.7, max_tokens = 1000) {
+  
+  # Validate inputs
+  if (is.null(api_key) || api_key == "") {
+    return(list(
+      success = FALSE,
+      content = NULL,
+      error = "OpenAI API key not configured"
+    ))
+  }
+  
+  if (!file.exists(image_path)) {
+    return(list(
+      success = FALSE,
+      content = NULL,
+      error = paste("Image file not found:", image_path)
+    ))
+  }
+  
+  tryCatch({
+    # Compress image if needed (OpenAI also has size limits)
+    processed_image_path <- compress_image_if_needed(image_path, max_size_mb = 4.5)
+    
+    # Read and encode image as base64
+    image_data <- readBin(processed_image_path, "raw", file.info(processed_image_path)$size)
+    image_base64 <- base64enc::base64encode(image_data)
+    
+    # Clean up temporary compressed file if created
+    if (processed_image_path != image_path && file.exists(processed_image_path)) {
+      unlink(processed_image_path)
+    }
+    
+    # Determine media type from file extension
+    ext <- tolower(tools::file_ext(image_path))
+    media_type <- switch(ext,
+      "jpg" = "image/jpeg",
+      "jpeg" = "image/jpeg",
+      "png" = "image/png",
+      "gif" = "image/gif",
+      "webp" = "image/webp",
+      "image/jpeg" # default
+    )
+    
+    # Construct data URL for OpenAI
+    data_url <- paste0("data:", media_type, ";base64,", image_base64)
+    
+    # Construct request body
+    body <- list(
+      model = model_name,
+      max_tokens = as.integer(max_tokens),
+      temperature = as.numeric(temperature),
+      messages = list(
+        list(
+          role = "user",
+          content = list(
+            list(
+              type = "text",
+              text = prompt
+            ),
+            list(
+              type = "image_url",
+              image_url = list(
+                url = data_url
+              )
+            )
+          )
+        )
+      )
+    )
+    
+    # Make API request
+    response <- httr2::request("https://api.openai.com/v1/chat/completions") %>%
+      httr2::req_headers(
+        "Authorization" = paste("Bearer", api_key),
+        "Content-Type" = "application/json"
+      ) %>%
+      httr2::req_body_json(body) %>%
+      httr2::req_timeout(60) %>%
+      httr2::req_retry(max_tries = 2) %>%
+      httr2::req_error(is_error = function(resp) FALSE) %>%
+      httr2::req_perform()
+    
+    # Check response status
+    if (httr2::resp_status(response) != 200) {
+      error_body <- httr2::resp_body_json(response)
+      error_msg <- if (!is.null(error_body$error$message)) {
+        error_body$error$message
+      } else {
+        paste("API error with status", httr2::resp_status(response))
+      }
+      
+      return(list(
+        success = FALSE,
+        content = NULL,
+        error = error_msg,
+        status_code = httr2::resp_status(response)
+      ))
+    }
+    
+    # Parse response
+    result <- httr2::resp_body_json(response)
+    
+    # Extract text content
+    if (!is.null(result$choices) && length(result$choices) > 0) {
+      text_content <- result$choices[[1]]$message$content
+      
+      return(list(
+        success = TRUE,
+        content = text_content,
+        model = result$model,
+        usage = result$usage,
+        error = NULL
+      ))
+    } else {
+      return(list(
+        success = FALSE,
+        content = NULL,
+        error = "No content in API response"
+      ))
+    }
+    
+  }, error = function(e) {
+    return(list(
+      success = FALSE,
+      content = NULL,
+      error = paste("OpenAI API call failed:", e$message)
+    ))
+  })
+}
+
+#' Get Model Display Name
+#' 
+#' @param model_id Model identifier string
+#' @return Human-readable model name
+#' @noRd
+get_model_display_name <- function(model_id) {
+  model_names <- list(
+    "claude-sonnet-4-20250514" = "Claude Sonnet 4",
+    "claude-sonnet-4-5-20250929" = "Claude Sonnet 4.5",
+    "claude-opus-4-20250514" = "Claude Opus 4",
+    "claude-opus-4-1-20250514" = "Claude Opus 4.1",
+    "gpt-4o" = "GPT-4o",
+    "gpt-4o-mini" = "GPT-4o Mini",
+    "gpt-4-turbo" = "GPT-4 Turbo",
+    "gpt-4" = "GPT-4"
+  )
+  
+  display_name <- model_names[[model_id]]
+  if (is.null(display_name)) {
+    return(model_id)  # Return original if not found
+  }
+  return(display_name)
+}
+
+#' Build Postal Card Analysis Prompt
+#' 
+#' @param extraction_type "individual" or "lot"
+#' @param card_count Number of cards (for lot type)
+#' @return Formatted prompt string
+#' @noRd
+build_postal_card_prompt <- function(extraction_type = "individual", card_count = 1) {
+  
+  base_prompt <- "You are an expert postal history analyst and vintage postcard appraiser. Analyze this image carefully and provide:\n\n"
+  
+  if (extraction_type == "lot") {
+    prompt <- paste0(base_prompt,
+      "1. A concise TITLE (max 80 characters) suitable for an online auction listing\n",
+      "2. A detailed DESCRIPTION (150-300 words) including:\n",
+      "   - Overall theme or collection type\n",
+      "   - Notable cards or highlights\n",
+      "   - Approximate time period(s)\n",
+      "   - General condition assessment\n",
+      "   - Historical significance or collecting value\n",
+      "   - Any visible text, postmarks, or identifying marks\n\n",
+      "Note: This is a lot of ", card_count, " postal cards.\n\n",
+      "Format your response EXACTLY as:\n",
+      "TITLE: [your title here]\n",
+      "DESCRIPTION: [your description here]"
+    )
+  } else {
+    prompt <- paste0(base_prompt,
+      "1. A concise TITLE (max 80 characters) suitable for an online auction listing\n",
+      "2. A detailed DESCRIPTION (150-300 words) including:\n",
+      "   - Subject matter and scene depicted\n",
+      "   - Approximate date or era\n",
+      "   - Location (if identifiable)\n",
+      "   - Condition (mint/used/damaged)\n",
+      "   - Any visible text, postmarks, stamps, or messages\n",
+      "   - Publisher or printer (if visible)\n",
+      "   - Historical or collecting significance\n",
+      "   - Notable details or features\n\n",
+      "Format your response EXACTLY as:\n",
+      "TITLE: [your title here]\n",
+      "DESCRIPTION: [your description here]"
+    )
+  }
+  
+  return(prompt)
+}
+
+#' Build Enhanced Postal Card Prompt with Price Recommendation
+#' 
+#' @param extraction_type "individual" or "lot" 
+#' @param card_count Number of cards (for lot type)
+#' @return Formatted prompt string with price recommendation
+#' @noRd
+build_enhanced_postal_card_prompt <- function(extraction_type = "individual", card_count = 1) {
+  
+  base_prompt <- "You are an expert postal history analyst and vintage postcard appraiser. Analyze this image carefully and provide:\n\n"
+  
+  if (extraction_type == "lot") {
+    prompt <- paste0(base_prompt,
+      "1. TITLE: A concise, descriptive title (50-80 characters)\n",
+      "   - Include collection theme or type\n",
+      "   - Include era if identifiable\n",
+      "   - Example: 'Vintage Postcard Lot - European Tourist Views, 1920s-1940s'\n\n",
+      "2. DESCRIPTION: Detailed description (150-300 characters)\n",
+      "   - Overall theme or collection type\n",
+      "   - Notable cards or highlights\n",
+      "   - Approximate time period(s)\n",
+      "   - General condition assessment\n",
+      "   - Historical significance or collecting value\n\n",
+      "3. CONDITION: Assess overall condition\n",
+      "   - Options: excellent, good, fair, poor\n",
+      "   - Excellent: No visible damage, crisp images\n",
+      "   - Good: Minor edge wear, images clear\n",
+      "   - Fair: Moderate wear, some fading\n",
+      "   - Poor: Significant damage or fading\n\n",
+      "4. RECOMMENDED_PRICE: Suggest eBay sale price in Euros\n",
+      "   - Consider age (older = more valuable)\n",
+      "   - Consider subjects (tourist landmarks > generic)\n",
+      "   - Consider condition\n",
+      "   - Consider quantity (more cards = higher total)\n",
+      "   - Typical range per card: €1.50 - €10.00\n",
+      "   - Format: numeric value only (e.g., 15.00 for a lot of 10)\n\n",
+      "Note: This is a lot of ", card_count, " postal cards.\n\n",
+      "Provide response in this EXACT format:\n",
+      "TITLE: [title here]\n",
+      "DESCRIPTION: [description here]\n",
+      "CONDITION: [excellent|good|fair|poor]\n",
+      "PRICE: [numeric value]"
+    )
+  } else {
+    prompt <- paste0(base_prompt,
+      "1. TITLE: A concise, descriptive title (50-80 characters)\n",
+      "   - Include location if visible\n",
+      "   - Include era if identifiable\n",
+      "   - Example: 'Vintage Postcard - Paris Eiffel Tower, 1920s'\n\n",
+      "2. DESCRIPTION: Detailed description (150-300 characters)\n",
+      "   - Describe the scene/subject\n",
+      "   - Note any visible text or landmarks\n",
+      "   - Mention condition observations\n",
+      "   - Historical context if applicable\n\n",
+      "3. CONDITION: Assess condition based on visible wear\n",
+      "   - Options: excellent, good, fair, poor\n",
+      "   - Excellent: No visible damage, crisp image\n",
+      "   - Good: Minor edge wear, image clear\n",
+      "   - Fair: Moderate wear, some fading\n",
+      "   - Poor: Significant damage or fading\n\n",
+      "4. RECOMMENDED_PRICE: Suggest eBay sale price in Euros\n",
+      "   - Consider age (older = more valuable)\n",
+      "   - Consider subject (tourist landmarks > generic scenes)\n",
+      "   - Consider condition\n",
+      "   - Consider printing quality visible in image\n",
+      "   - Typical range: €1.50 - €10.00\n",
+      "   - Format: numeric value only (e.g., 2.50)\n\n",
+      "Provide response in this EXACT format:\n",
+      "TITLE: [title here]\n",
+      "DESCRIPTION: [description here]\n",
+      "CONDITION: [excellent|good|fair|poor]\n",
+      "PRICE: [numeric value]"
+    )
+  }
+  
+  return(prompt)
+}
+
+#' Parse AI Response for Title and Description
+#' 
+#' @param ai_response Raw text response from AI
+#' @return List with title and description
+#' @noRd
+parse_ai_response <- function(ai_response) {
+  
+  if (is.null(ai_response) || ai_response == "") {
+    return(list(
+      title = "",
+      description = ""
+    ))
+  }
+  
+  # Try to parse structured format first
+  title_match <- regexpr("TITLE:\\s*(.+?)(?=\n|$)", ai_response, perl = TRUE)
+  desc_match <- regexpr("DESCRIPTION:\\s*(.+?)$", ai_response, perl = TRUE)
+  
+  if (title_match > 0) {
+    # Extract title
+    title_start <- attr(title_match, "capture.start")[1]
+    title_length <- attr(title_match, "capture.length")[1]
+    title <- substr(ai_response, title_start, title_start + title_length - 1)
+    title <- trimws(title)
+  } else {
+    # Fallback: use first line as title
+    first_line <- strsplit(ai_response, "\n")[[1]][1]
+    title <- trimws(first_line)
+    # Limit to 80 characters
+    if (nchar(title) > 80) {
+      title <- substr(title, 1, 77)
+      title <- paste0(title, "...")
+    }
+  }
+  
+  if (desc_match > 0) {
+    # Extract description
+    desc_start <- attr(desc_match, "capture.start")[1]
+    desc_length <- attr(desc_match, "capture.length")[1]
+    description <- substr(ai_response, desc_start, desc_start + desc_length - 1)
+    description <- trimws(description)
+  } else {
+    # Fallback: use everything after first line
+    lines <- strsplit(ai_response, "\n")[[1]]
+    if (length(lines) > 1) {
+      description <- paste(lines[-1], collapse = "\n")
+      description <- trimws(description)
+    } else {
+      description <- ai_response
+    }
+  }
+  
+  return(list(
+    title = title,
+    description = description
+  ))
+}
+
+#' Parse Enhanced AI Response with Price and Condition
+#' 
+#' @param ai_response Raw text response from AI
+#' @return List with title, description, condition, and price
+#' @noRd
+parse_enhanced_ai_response <- function(ai_response) {
+  
+  if (is.null(ai_response) || ai_response == "") {
+    return(list(
+      title = "",
+      description = "",
+      condition = "used",
+      price = 2.50
+    ))
+  }
+  
+  # Extract title
+  title_match <- regexpr("TITLE:\\s*(.+?)(?=\n|$)", ai_response, perl = TRUE)
+  if (title_match > 0) {
+    title_start <- attr(title_match, "capture.start")[1]
+    title_length <- attr(title_match, "capture.length")[1]
+    title <- substr(ai_response, title_start, title_start + title_length - 1)
+    title <- trimws(title)
+  } else {
+    # Fallback: use first line
+    first_line <- strsplit(ai_response, "\n")[[1]][1]
+    title <- trimws(first_line)
+    if (nchar(title) > 80) {
+      title <- substr(title, 1, 77)
+      title <- paste0(title, "...")
+    }
+  }
+  
+  # Extract description (match up to CONDITION or end) - use DOTALL to match newlines
+  desc_match <- regexpr("DESCRIPTION:\\s*(.+?)(?=\nCONDITION:|\nPRICE:|$)", ai_response, perl = TRUE)
+  if (desc_match > 0) {
+    desc_start <- attr(desc_match, "capture.start")[1]
+    desc_length <- attr(desc_match, "capture.length")[1]
+    description <- substr(ai_response, desc_start, desc_start + desc_length - 1)
+    description <- trimws(description)
+  } else {
+    # Fallback: try to find text between DESCRIPTION and CONDITION
+    desc_parts <- strsplit(ai_response, "DESCRIPTION:")[[1]]
+    if (length(desc_parts) > 1) {
+      # Get everything after DESCRIPTION:
+      after_desc <- desc_parts[2]
+      # Split at CONDITION: if present
+      before_condition <- strsplit(after_desc, "\nCONDITION:")[[1]][1]
+      description <- trimws(before_condition)
+    } else {
+      description <- ""
+    }
+  }
+  
+  # Extract condition
+  condition_match <- regexpr("CONDITION:\\s*(excellent|good|fair|poor|used)", ai_response, perl = TRUE, ignore.case = TRUE)
+  if (condition_match > 0) {
+    cond_start <- attr(condition_match, "capture.start")[1]
+    cond_length <- attr(condition_match, "capture.length")[1]
+    condition <- tolower(substr(ai_response, cond_start, cond_start + cond_length - 1))
+    condition <- trimws(condition)
+  } else {
+    condition <- "used"  # Default
+  }
+  
+  # Extract price
+  price_match <- regexpr("PRICE:\\s*([0-9]+\\.?[0-9]*)", ai_response, perl = TRUE)
+  if (price_match > 0) {
+    price_start <- attr(price_match, "capture.start")[1]
+    price_length <- attr(price_match, "capture.length")[1]
+    price_text <- substr(ai_response, price_start, price_start + price_length - 1)
+    price <- as.numeric(trimws(price_text))
+    
+    # Validate and clamp price to reasonable range
+    if (!is.na(price) && price > 0) {
+      price <- max(0.50, min(price, 50.00))  # Clamp between €0.50 and €50.00
+    } else {
+      price <- 2.50  # Default
+    }
+  } else {
+    price <- 2.50  # Default fallback
+  }
+  
+  return(list(
+    title = title,
+    description = description,
+    condition = condition,
+    price = price
+  ))
+}
+
+#' Get Available AI Models
+#' 
+#' @return Named list of available models grouped by provider
+#' @noRd
+get_available_models <- function() {
+  config <- get_llm_config()
+  
+  models <- list()
+  
+  # Claude models (if configured)
+  if (!is.null(config$claude_api_key) && config$claude_api_key != "") {
+    models$claude <- list(
+      "claude-sonnet-4-5-20250929" = "Claude Sonnet 4.5 (Recommended)",
+      "claude-sonnet-4-20250514" = "Claude Sonnet 4",
+      "claude-opus-4-1-20250514" = "Claude Opus 4.1 (Most Capable)",
+      "claude-opus-4-20250514" = "Claude Opus 4"
+    )
+  }
+  
+  # OpenAI models (if configured)
+  if (!is.null(config$openai_api_key) && config$openai_api_key != "") {
+    models$openai <- list(
+      "gpt-4o" = "GPT-4o (Fast)",
+      "gpt-4o-mini" = "GPT-4o Mini (Economical)",
+      "gpt-4-turbo" = "GPT-4 Turbo"
+    )
+  }
+  
+  return(models)
+}
+
+#' Determine Provider from Model Name
+#' 
+#' @param model_name Model identifier string
+#' @return "claude" or "openai"
+#' @noRd
+get_provider_from_model <- function(model_name) {
+  if (grepl("claude", model_name, ignore.case = TRUE)) {
+    return("claude")
+  } else if (grepl("gpt", model_name, ignore.case = TRUE)) {
+    return("openai")
+  } else {
+    return("claude")  # Default
+  }
+}

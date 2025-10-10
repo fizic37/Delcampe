@@ -18,6 +18,22 @@ This directory contains persistent context and solutions for the Delcampe projec
   - Problem: Draggable lines offset from crop boundaries
   - Solution: JavaScript rewrite with proper coordinate systems
   - Status: ✅ COMPLETE AND TESTED
+- **shownotification_type_error_fix.md** - ⭐ Process Combined Images fix (2025-10-06)
+  - Problem: 'arg' should be one of "default", "message", "warning", "error"
+  - Solution: Fixed notification types + implemented Python function call
+  - Status: ✅ COMPLETE AND TESTED
+- **genai_integration_fix_20251007.md** - ⭐ GenAI image analysis fix (2025-10-07)
+  - Problem: GenAI errors + no model selection in UI
+  - Solution: Connected real API calls + added model selector dropdown
+  - Status: ✅ COMPLETE - READY FOR TESTING
+- **llm_settings_fix_complete_20251009.md** - ⭐ LLM Settings UI visibility fix (2025-10-09)
+  - Problem: LLM Models tab not visible in Settings menu
+  - Solution: Changed user role from "user" to "admin" in app_server.R
+  - Status: ✅ COMPLETE AND TESTED
+- **llm_modal_fix_20251009.md** - ⭐ LLM Modal dialog fix (2025-10-09)
+  - Problem: Modal showing "no model configured" and default model not pre-selected
+  - Solution: Created missing get_llm_config() function in ai_api_helpers.R
+  - Status: ✅ COMPLETE AND TESTED
 
 ### Analysis & Progress
 - **existing_module_analysis.md** - Module structure analysis
@@ -78,6 +94,19 @@ Track of all major solutions implemented:
 | Date | Problem | Solution File | Status | Tests |
 |------|---------|---------------|--------|-------|
 | 2025-01-06 | Draggable lines coordinate mapping | draggable_lines_coordinate_fix.md | ✅ Complete | tests/testthat/test-mod_postal_card_processor.R |
+| 2025-10-06 | showNotification type error | shownotification_type_error_fix.md | ✅ Complete | Manual testing |
+| 2025-10-07 | "Start Over" button not functional | start_over_button_implementation.md | ✅ Complete | Manual testing |
+| 2025-10-07 | GenAI image analysis error + missing model selection | genai_integration_fix_20251007.md | ✅ Complete | Manual testing |
+| 2025-10-07 | LLM Settings UI not visible | llm_settings_incomplete_20251007.md | ⚠️ INCOMPLETE | Documented problem |
+| 2025-10-09 | LLM Settings UI visibility fix | llm_settings_fix_complete_20251009.md | ✅ Complete | Manual testing |
+| 2025-10-09 | LLM Modal dialog fix (no model configured) | llm_modal_fix_20251009.md | ✅ Complete | Manual testing |
+| 2025-10-09 | AI Extraction Feature - Complete Implementation | ai_extraction_complete_20251009.md | ✅ Complete | Manual testing |
+| 2025-10-09 | Six Enhancement Tasks (4 of 6 complete) | six_enhancements_complete_20251009.md | ⚠️ Partial (4/6) | Manual testing |
+| 2025-10-09 | AI Notification Enhancement - Better Progress Feedback | ai_notification_enhancement_20251009.md | ✅ IMPLEMENTED | Ready to test |
+| 2025-10-09 | AI Notification Implementation Complete | ai_notification_implementation_20251009.md | ✅ Complete | User testing needed |
+| 2025-10-09 | AI Notification Granular Messages Update | ai_notification_granular_20251009.md | ✅ Enhanced | 14 status messages |
+| 2025-10-10 | API Keys Storage + UI Layout Fix | api_keys_and_ui_fix_complete_20251010.md | ✅ Complete | Production ready |
+| 2025-10-10 | Right Panel Layout - Non-blocking UI | panel_layout_implementation_20251010.md | ✅ Implemented | Ready for testing |
 
 ## Adding New Solutions
 

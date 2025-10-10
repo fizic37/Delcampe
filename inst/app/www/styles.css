@@ -348,3 +348,96 @@ img[id$="preview_image"] {
     width: 6px;
   }
 }
+
+/* ============================================================================
+   ACCORDION EXPORT CARDS - Enhanced Animations
+   ============================================================================ */
+
+/* Smooth fade-in for cards */
+.export-card {
+  animation: fadeInUp 0.3s ease;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Pulse animation for pending status */
+.status-pending {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* Focus states for accessibility */
+.card-header-custom:focus-within {
+  outline: 2px solid #4c6ef5;
+  outline-offset: 2px;
+}
+
+/* Smooth transitions for form fields in accordion */
+.form-section input,
+.form-section textarea,
+.form-section select {
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.form-section input:focus,
+.form-section textarea:focus,
+.form-section select:focus {
+  border-color: #4c6ef5;
+  box-shadow: 0 0 0 3px rgba(76, 110, 245, 0.1);
+}
+
+/* Responsive grid adjustments for accordion */
+@media (max-width: 1400px) {
+  .form-container {
+    grid-template-columns: 350px 1fr !important;
+  }
+}
+
+@media (max-width: 1024px) {
+  .form-container {
+    grid-template-columns: 1fr !important;
+  }
+  
+  .card-thumbnail {
+    width: 60px !important;
+    height: 45px !important;
+  }
+  
+  .card-title-text {
+    font-size: 14px !important;
+  }
+}
+
+/* Print styles - hide interactive elements */
+@media print {
+  .card-header-custom {
+    cursor: default;
+  }
+  
+  .toggle-icon,
+  .form-actions,
+  .ai-controls {
+    display: none;
+  }
+  
+  .card-content {
+    display: block !important;
+  }
+}

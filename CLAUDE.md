@@ -23,6 +23,13 @@
 - Use established patterns for Python function calls and data exchange
 - Only extend, never replace, the working Python integration
 
+#### File Management and Backups
+- **CRITICAL**: Never save backup files inside the `R/` directory - they will be loaded into the R environment
+- **ALWAYS** store backups in: `C:\Users\mariu\Documents\R_Projects\Delcampe_BACKUP\`
+- **Rule**: The `R/` folder should contain ONLY active, production module files
+- Before modifying any file, create a timestamped backup in the BACKUP folder outside the project
+- Backup naming convention: `filename.R.backup` or `filename_BACKUP_YYYYMMDD.R`
+
 #### Authentication Architecture
 - **Master User System**: Two master users with protected status
 - Master users can manage their own credentials and created users
@@ -42,11 +49,20 @@
 - **Second Priority**: Use bslib components for enhanced UI/styling needs
 - **Third Priority**: Use shinyjs for DOM manipulation not available in base Shiny
 - **Fourth Priority**: Custom JavaScript code for complex interactions
-- **CRITICAL**: When using shinyjs or JavaScript, proper handling of Shiny module namespaces is essential
+- **CRITICAL MODULE NAMESPACE RULE**: In Shiny modules, ALWAYS prefer native Shiny/bslib components over custom JavaScript
+  - Custom jQuery/JavaScript onclick handlers FAIL in modules due to namespace issues
+  - shinyjs functions don't reliably handle module namespaces
+  - bslib components (accordion, card, etc.) handle namespacing automatically
+  - **Question to ask first**: "Does bslib have a built-in component for this?"
 
 #### JavaScript Integration Constraints
 - **Examine All Files**: Include analysis of any JavaScript files in examples/ directory
 - **Preserve JS Patterns**: JavaScript integrations must be preserved exactly as implemented
+- **CRITICAL MODULE NAMESPACE RULE**: In Shiny modules, ALWAYS prefer native Shiny/bslib components over custom JavaScript
+  - Custom jQuery/JavaScript onclick handlers FAIL in modules due to namespace issues
+  - shinyjs functions don't reliably handle module namespaces
+  - bslib components (accordion, card, etc.) handle namespacing automatically
+  - **Question to ask first**: "Does bslib have a built-in component for this?"
 - **ULTRA-THINK**: When considering custom JavaScript integration, conduct thorough analysis:
   - What existing JavaScript files are in examples/ and how do they integrate with Shiny?
   - Can the same functionality be achieved with base Shiny or bslib components?

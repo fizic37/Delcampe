@@ -1,21 +1,20 @@
-#' Delcampe Export UI Function
+#' Delcampe Export UI Function  
 #'
-#' @description A shiny Module for handling Delcampe export actions.
-#' Provides UI for sending processed images to Delcampe with AI extraction support.
+#' @description A shiny Module for exporting images to eBay with AI extraction support.
+#' USING bslib::accordion() for proper namespace handling
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
-#' @export
+#' @noRd
 #'
 #' @importFrom shiny NS tagList
+#' @importFrom bslib accordion accordion_panel
 mod_delcampe_export_ui <- function(id) {
   ns <- NS(id)
+  
   tagList(
-    # Status display area
-    uiOutput(ns("export_status_display")),
-    
-    # Export controls
-    uiOutput(ns("export_controls"))
+    # Accordion will be dynamically generated
+    uiOutput(ns("accordion_container"))
   )
 }
 
@@ -24,433 +23,520 @@ mod_delcampe_export_ui <- function(id) {
 #' @param image_paths Reactive containing vector of image paths
 #' @param image_type Character string ("lot" or "combined") to distinguish image types
 #'
-#' @export
+#' @noRd
 mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_type = "combined") {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
-    # Reactive values to track export status
+    # State management
     rv <- reactiveValues(
-      sent_images = character(0),      # Vector of image paths that have been sent
-      pending_images = character(0),   # Vector of image paths currently being sent
-      failed_images = character(0),    # Vector of image paths that failed to send
-      current_image_path = NULL,       # Currently selected image for modal
-      current_image_index = NULL,      # Current image index for display
-      ai_extracting = FALSE,           # Whether AI extraction is in progress
-      ai_result = NULL                 # Latest AI extraction result
+      sent_images = character(0),
+      pending_images = character(0),
+      failed_images = character(0),
+      image_drafts = list(),
+      current_image_index = NULL,
+      ai_extracting = FALSE,
+      ai_result = NULL,
+      selected_model = NULL,
+      ai_status = ""
     )
     
-    # Export status display
-    output$export_status_display <- renderUI({
+    # Generate accordion dynamically
+    output$accordion_container <- renderUI({
+      req(image_paths())
       paths <- image_paths()
-      if (is.null(paths) || length(paths) == 0) {
+      
+      if (length(paths) == 0) {
         return(div(
-          style = "text-align: center; color: #aaa; padding: 20px;",
-          icon("upload", style = "font-size: 24px; margin-bottom: 8px;"),
-          p("No images available for export", style = "margin: 0; font-size: 12px;")
+          style = "padding: 40px; text-align: center; color: #868e96;",
+          icon("image", style = "font-size: 48px; margin-bottom: 16px;"),
+          h4("No images to export"),
+          p("Process some images first to export them to eBay.")
         ))
       }
       
-      sent_count <- length(rv$sent_images)
-      total_count <- length(paths)
-      pending_count <- length(rv$pending_images)
-      failed_count <- length(rv$failed_images)
+      # Create accordion panels for each image
+      panels <- lapply(seq_along(paths), function(i) {
+        create_accordion_panel(i, paths[i])
+      })
       
-      div(
-        style = "padding: 10px; background-color: #f8f9fa; border-radius: 5px; margin-bottom: 15px;",
-        div(
-          style = "display: flex; justify-content: space-between; align-items: center;",
-          div(
-            h6(paste(total_count, image_type, "images"), style = "margin: 0; color: #495057;"),
-            p(paste("Sent:", sent_count, "| Pending:", pending_count, "| Failed:", failed_count), 
-              style = "margin: 0; font-size: 11px; color: #6c757d;")
-          ),
-          if (total_count > 0) {
-            actionButton(
-              inputId = ns("send_all"),
-              label = "Send All",
-              icon = icon("paper-plane"),
-              class = "btn-primary btn-sm",
-              disabled = pending_count > 0
-            )
-          }
-        )
+      # Use bslib::accordion with open = FALSE to start collapsed
+      # multiple = FALSE means only one panel can be open at a time (auto-collapse)
+      bslib::accordion(
+        id = ns("export_accordion"),
+        open = FALSE,  # All closed by default
+        multiple = FALSE,  # Auto-collapse: only one open at a time
+        !!!panels  # Splice in the list of panels
       )
     })
     
-    # Export controls - individual image buttons
-    output$export_controls <- renderUI({
-      paths <- image_paths()
-      if (is.null(paths) || length(paths) == 0) {
-        return(NULL)
-      }
+    # Create individual accordion panel
+    create_accordion_panel <- function(idx, path) {
+      status <- get_image_status(idx)
+      status_badge <- get_status_badge(status)
       
-      image_controls <- lapply(seq_along(paths), function(i) {
-        image_path <- paths[i]
-        button_id <- paste0("send_btn_", i)
-        
-        # Determine button state
-        button_class <- "btn-outline-primary"
-        button_label <- "Send to Delcampe"
-        button_icon <- icon("paper-plane")
-        button_disabled <- FALSE
-        
-        if (image_path %in% rv$sent_images) {
-          button_class <- "btn-success"
-          button_label <- "Sent ✓"
-          button_icon <- icon("check")
-          button_disabled <- TRUE
-        } else if (image_path %in% rv$pending_images) {
-          button_class <- "btn-warning"
-          button_label <- "Sending..."
-          button_icon <- icon("spinner", class = "fa-spin")
-          button_disabled <- TRUE
-        } else if (image_path %in% rv$failed_images) {
-          button_class <- "btn-danger"
-          button_label <- "Failed - Retry"
-          button_icon <- icon("exclamation-triangle")
-        }
-        
-        div(
-          style = "border: 1px solid #ddd; border-radius: 8px; padding: 12px; background-color: white; margin-bottom: 12px;",
-          div(
-            style = "display: flex; align-items: center; gap: 15px;",
-            # Image thumbnail
-            div(
-              style = "flex: 0 0 100px;",
-              tags$img(
-                src = image_path,
-                style = "width: 100px; height: 75px; object-fit: contain; border-radius: 4px; border: 1px solid #eee; cursor: pointer;",
-                onclick = paste0("Shiny.setInputValue('", ns("preview_image"), "', {path: '", image_path, "', index: ", i, "}, {priority: 'event'});")
-              )
-            ),
-            # Image info
-            div(
-              style = "flex: 1;",
-              h6(paste(tools::toTitleCase(image_type), i), style = "margin: 0 0 5px 0; font-size: 14px; color: #495057;"),
-              p("Click image to preview", style = "margin: 0; font-size: 11px; color: #6c757d;")
-            ),
-            # Action button
-            div(
-              style = "flex: 0 0 auto;",
-              actionButton(
-                inputId = ns(button_id),
-                label = button_label,
-                icon = button_icon,
-                class = paste("btn-sm", button_class),
-                disabled = button_disabled
-              )
-            )
-          )
-        )
-      })
-      
-      do.call(tagList, image_controls)
-    })
-    
-    # Handle individual send buttons
-    observe({
-      paths <- image_paths()
-      if (is.null(paths) || length(paths) == 0) return()
-      
-      lapply(seq_along(paths), function(i) {
-        button_id <- paste0("send_btn_", i)
-        
-        observeEvent(input[[button_id]], {
-          image_path <- paths[i]
-          
-          # Show send confirmation modal with AI extraction
-          show_send_modal(image_path, i)
-        }, ignoreInit = TRUE)
-      })
-    })
-    
-    # Handle send all button
-    observeEvent(input$send_all, {
-      paths <- image_paths()
-      if (is.null(paths) || length(paths) == 0) return()
-      
-      # Send all images that haven't been sent yet
-      unsent_paths <- setdiff(paths, c(rv$sent_images, rv$pending_images))
-      
-      if (length(unsent_paths) > 0) {
-        showModal(modalDialog(
-          title = "Confirm Send All",
-          paste("Send", length(unsent_paths), "images to Delcampe?"),
-          footer = tagList(
-            modalButton("Cancel"),
-            actionButton(ns("confirm_send_all"), "Send All", class = "btn-primary")
-          )
-        ))
-      }
-    })
-    
-    # Handle confirm send all
-    observeEvent(input$confirm_send_all, {
-      paths <- image_paths()
-      unsent_paths <- setdiff(paths, c(rv$sent_images, rv$pending_images))
-      
-      # Add to pending
-      rv$pending_images <- c(rv$pending_images, unsent_paths)
-      
-      # Simulate sending process (replace with actual Delcampe API calls)
-      lapply(unsent_paths, function(path) {
-        # Simulate delay
-        later::later(function() {
-          # Remove from pending
-          rv$pending_images <- setdiff(rv$pending_images, path)
-          
-          # Simulate success/failure (90% success rate)
-          if (runif(1) < 0.9) {
-            rv$sent_images <- c(rv$sent_images, path)
-            showNotification(paste("Successfully sent", basename(path)), type = "success")
-          } else {
-            rv$failed_images <- c(rv$failed_images, path)
-            showNotification(paste("Failed to send", basename(path)), type = "error")
-          }
-        }, delay = runif(1, 1, 3))
-      })
-      
-      removeModal()
-      showNotification("Sending images...", type = "message")
-    })
-    
-    # Handle image preview
-    observeEvent(input$preview_image, {
-      image_data <- input$preview_image
-      rv$current_image_path <- image_data$path
-      rv$current_image_index <- image_data$index
-      
-      showModal(modalDialog(
-        title = paste("Preview -", tools::toTitleCase(image_type), image_data$index),
-        size = "l",
-        
-        div(
-          style = "text-align: center;",
-          tags$img(
-            src = image_data$path,
-            style = "max-width: 100%; max-height: 500px; object-fit: contain;"
-          )
+      # Panel title with thumbnail and status
+      panel_title <- div(
+        style = "display: flex; align-items: center; gap: 12px;",
+        tags$img(
+          src = path,
+          style = "width: 80px; height: 60px; object-fit: cover; border-radius: 4px; border: 2px solid #dee2e6;"
         ),
-        
-        footer = tagList(
-          modalButton("Close"),
-          actionButton(
-            ns("send_from_modal"),
-            "Send to Delcampe",
-            class = "btn-primary",
-            icon = icon("paper-plane")
-          )
-        )
-      ))
-    })
-    
-    # Handle send from modal
-    observeEvent(input$send_from_modal, {
-      if (!is.null(rv$current_image_path)) {
-        image_path <- rv$current_image_path
-        
-        # Add to pending
-        rv$pending_images <- c(rv$pending_images, image_path)
-        
-        # Simulate sending (replace with actual implementation)
-        later::later(function() {
-          rv$pending_images <- setdiff(rv$pending_images, image_path)
-          
-          if (runif(1) < 0.9) {
-            rv$sent_images <- c(rv$sent_images, image_path)
-            showNotification("Successfully sent to Delcampe!", type = "success")
-          } else {
-            rv$failed_images <- c(rv$failed_images, image_path)
-            showNotification("Failed to send to Delcampe", type = "error")
-          }
-        }, delay = 2)
-        
-        removeModal()
-        showNotification("Sending to Delcampe...", type = "message")
-      }
-    })
-    
-    # Show send confirmation modal with AI extraction
-    show_send_modal <- function(image_path, image_index) {
-      rv$current_image_path <- image_path
-      rv$current_image_index <- image_index
-      rv$ai_result <- NULL
-      
-      showModal(modalDialog(
-        title = paste("Send to Delcampe -", tools::toTitleCase(image_type), image_index),
-        size = "xl",
-        
-        fluidRow(
-          # Left column - Image preview
-          column(
-            width = 6,
-            div(
-              style = "text-align: center; border: 1px solid #ddd; border-radius: 8px; padding: 15px;",
-              h5("Image Preview", style = "margin-top: 0;"),
-              tags$img(
-                src = image_path,
-                style = "max-width: 100%; max-height: 400px; object-fit: contain; border-radius: 4px;"
-              )
-            )
-          ),
-          
-          # Right column - AI extraction and form
-          column(
-            width = 6,
-            div(
-              style = "border: 1px solid #ddd; border-radius: 8px; padding: 15px;",
-              h5("AI Description Extraction", style = "margin-top: 0;"),
-              
-              div(
-                style = "margin-bottom: 15px;",
-                actionButton(
-                  ns("extract_ai_description"),
-                  "Extract Description with AI",
-                  icon = icon("magic"),
-                  class = "btn-info btn-sm"
-                )
-              ),
-              
-              # AI extraction result
-              uiOutput(ns("ai_extraction_result")),
-              
-              # Delcampe form fields
-              div(
-                style = "margin-top: 20px;",
-                h6("Delcampe Details"),
-                textInput(ns("item_title"), "Title:", placeholder = "Enter item title"),
-                textAreaInput(ns("item_description"), "Description:", 
-                             placeholder = "Enter item description", rows = 4),
-                numericInput(ns("starting_price"), "Starting Price (€):", value = 1.0, min = 0.01, step = 0.01),
-                selectInput(ns("condition"), "Condition:", 
-                           choices = list("Mint" = "mint", "Used" = "used", "Fair" = "fair"))
-              )
-            )
-          )
+        div(
+          style = "flex: 1;",
+          strong(paste0(tools::toTitleCase(image_type), " ", idx))
         ),
-        
-        footer = tagList(
-          modalButton("Cancel"),
-          actionButton(
-            ns("confirm_send_to_delcampe"),
-            "Send to Delcampe",
-            class = "btn-success",
-            icon = icon("paper-plane")
-          )
-        )
-      ))
+        status_badge
+      )
+      
+      # Panel content (form)
+      panel_content <- create_form_content(idx, path)
+      
+      bslib::accordion_panel(
+        title = panel_title,
+        value = paste0("panel_", idx),
+        panel_content
+      )
     }
     
-    # AI extraction result display
-    output$ai_extraction_result <- renderUI({
-      if (rv$ai_extracting) {
-        div(
-          style = "padding: 10px; background-color: #e3f2fd; border-radius: 4px; margin: 10px 0;",
-          div(
-            style = "text-align: center;",
-            icon("spinner", class = "fa-spin", style = "margin-right: 8px;"),
-            "Extracting description with AI..."
-          )
-        )
-      } else if (!is.null(rv$ai_result)) {
-        div(
-          style = "padding: 10px; background-color: #e8f5e8; border-radius: 4px; margin: 10px 0;",
-          h6("AI Extracted Information:", style = "margin: 0 0 8px 0; color: #2e7d32;"),
-          div(
-            style = "background-color: white; padding: 8px; border-radius: 4px; font-size: 12px;",
-            rv$ai_result$description
-          ),
-          if (!is.null(rv$ai_result$suggested_title)) {
-            div(
-              style = "margin-top: 8px;",
-              strong("Suggested Title: "), rv$ai_result$suggested_title
-            )
-          },
-          div(
-            style = "margin-top: 8px;",
-            actionButton(
-              ns("apply_ai_result"),
-              "Apply to Form",
-              class = "btn-success btn-xs",
-              icon = icon("check")
-            )
-          )
-        )
-      }
-    })
-    
-    # Handle AI extraction
-    observeEvent(input$extract_ai_description, {
-      rv$ai_extracting <- TRUE
-      
-      # Simulate AI extraction (replace with actual AI API call)
-      later::later(function() {
-        rv$ai_extracting <- FALSE
-        rv$ai_result <- list(
-          description = paste("Vintage postal card featuring beautiful architectural details.",
-                             "Good condition with minor signs of age.",
-                             "Ideal for collectors of European postal history."),
-          suggested_title = paste("Vintage European Postal Card -", tools::toTitleCase(image_type), rv$current_image_index)
-        )
-      }, delay = 2)
-    })
-    
-    # Handle apply AI result
-    observeEvent(input$apply_ai_result, {
-      if (!is.null(rv$ai_result)) {
-        updateTextInput(session, "item_title", value = rv$ai_result$suggested_title)
-        updateTextAreaInput(session, "item_description", value = rv$ai_result$description)
-      }
-    })
-    
-    # Handle final send to Delcampe
-    observeEvent(input$confirm_send_to_delcampe, {
-      image_path <- rv$current_image_path
-      
-      # Validate form
-      if (is.null(input$item_title) || input$item_title == "") {
-        showNotification("Please enter a title", type = "error")
-        return()
-      }
-      
-      # Add to pending
-      rv$pending_images <- c(rv$pending_images, image_path)
-      
-      # Simulate sending with form data (replace with actual Delcampe API)
-      form_data <- list(
-        title = input$item_title,
-        description = input$item_description,
-        price = input$starting_price,
-        condition = input$condition
+    # Get status badge HTML
+    get_status_badge <- function(status) {
+      badge_data <- switch(status,
+        "ready" = list(label = "Ready", color = "#1971c2", bg = "#e7f5ff"),
+        "draft" = list(label = "Draft", color = "#f08c00", bg = "#fff3bf"),
+        "sent" = list(label = "Sent", color = "#2f9e44", bg = "#d3f9d8"),
+        "pending" = list(label = "Sending...", color = "#7950f2", bg = "#e5dbff"),
+        "failed" = list(label = "Failed", color = "#c92a2a", bg = "#ffe3e3"),
+        list(label = "Ready", color = "#1971c2", bg = "#e7f5ff")
       )
       
-      later::later(function() {
-        rv$pending_images <- setdiff(rv$pending_images, image_path)
-        
-        if (runif(1) < 0.9) {
-          rv$sent_images <- c(rv$sent_images, image_path)
-          showNotification("Successfully sent to Delcampe!", type = "success")
-        } else {
-          rv$failed_images <- c(rv$failed_images, image_path)
-          showNotification("Failed to send to Delcampe", type = "error")
-        }
-      }, delay = 3)
+      span(
+        style = paste0(
+          "padding: 4px 12px; border-radius: 12px; font-size: 13px; font-weight: 500; ",
+          "background: ", badge_data$bg, "; color: ", badge_data$color, ";"
+        ),
+        badge_data$label
+      )
+    }
+    
+    # Get image status
+    get_image_status <- function(idx) {
+      paths <- image_paths()
+      if (is.null(paths) || idx > length(paths)) return("ready")
       
-      removeModal()
-      showNotification("Sending to Delcampe...", type = "message")
+      path <- paths[idx]
+      
+      if (path %in% isolate(rv$sent_images)) return("sent")
+      if (path %in% isolate(rv$pending_images)) return("pending")
+      if (path %in% isolate(rv$failed_images)) return("failed")
+      
+      draft_key <- as.character(idx)
+      drafts <- isolate(rv$image_drafts)
+      if (!is.null(drafts) && draft_key %in% names(drafts)) return("draft")
+      
+      return("ready")
+    }
+    
+    # Create form content for accordion panel
+    create_form_content <- function(idx, path) {
+      div(
+        style = "padding: 20px;",
+        
+        fluidRow(
+          # Left: Image preview (width 6)
+          column(
+            6,
+            div(
+              style = "text-align: center;",
+              tags$img(
+                src = path,
+                style = "width: 100%; max-height: 300px; object-fit: contain; border-radius: 8px; border: 1px solid #dee2e6;"
+              )
+            )
+          ),
+          
+          # Right: AI controls (width 6)
+          column(
+            6,
+            div(
+              style = "padding: 16px; background: #f1f3f5; border-radius: 6px; border-left: 4px solid #4c6ef5; height: 100%;",
+              h5(icon("robot"), " AI Assistant", style = "margin-top: 0;"),
+              selectInput(
+                ns(paste0("ai_model_", idx)),
+                "Model",
+                choices = c("Claude" = "claude", "GPT-4" = "gpt4"),
+                selected = "claude",
+                width = "100%"
+              ),
+              actionButton(
+                ns(paste0("extract_ai_", idx)),
+                "Extract with AI",
+                icon = icon("wand-magic-sparkles"),
+                class = "btn-primary",
+                style = "width: 100%; margin-top: 10px;"
+              )
+            )
+          )
+        ),
+        
+        # AI Status output (width 12)
+        fluidRow(
+          column(
+            12,
+            uiOutput(ns(paste0("ai_status_", idx)))
+          )
+        ),
+        
+        # Title (width 12)
+        fluidRow(
+          column(
+            12,
+            textAreaInput(
+              ns(paste0("item_title_", idx)),
+              "Title *",
+              rows = 2,
+              placeholder = "Enter listing title...",
+              width = "100%"
+            )
+          )
+        ),
+        
+        # Description (width 12)
+        fluidRow(
+          column(
+            12,
+            textAreaInput(
+              ns(paste0("item_description_", idx)),
+              "Description *",
+              rows = 6,
+              placeholder = "Enter detailed description...",
+              width = "100%"
+            )
+          )
+        ),
+        
+        # Price and Condition (width 6 each)
+        fluidRow(
+          column(
+            6,
+            numericInput(
+              ns(paste0("starting_price_", idx)),
+              "Price (€) *",
+              value = 2.50,
+              min = 0.50,
+              step = 0.50,
+              width = "100%"
+            )
+          ),
+          column(
+            6,
+            selectInput(
+              ns(paste0("condition_", idx)),
+              "Condition *",
+              choices = c(
+                "Used" = "used",
+                "Excellent" = "excellent",
+                "Good" = "good",
+                "Fair" = "fair",
+                "Poor" = "poor"
+              ),
+              selected = "used",
+              width = "100%"
+            )
+          )
+        ),
+        
+        # Action button - Send to eBay
+        fluidRow(
+          column(
+            12,
+            div(
+              style = "margin-top: 16px;",
+              actionButton(
+                ns(paste0("send_to_ebay_", idx)),
+                "Send to eBay",
+                icon = icon("upload"),
+                class = "btn-success",
+                style = "width: 100%;"
+              )
+            )
+          )
+        )
+      )
+    }
+    
+    # Helper function to convert web URL to file system path
+    convert_web_path_to_file_path <- function(web_path) {
+      cat("   🔍 Converting web path to file path...\n")
+      cat("      Web path:", web_path, "\n")
+      
+      # Remove any resource prefix (e.g., "combined_session_images/" or "lot_session_images/")
+      # Extract just the filename and relative directory structure
+      cleaned_path <- sub("^[^/]+/", "", web_path)  # Remove first directory
+      
+      cat("      Cleaned path:", cleaned_path, "\n")
+      
+      # Get the basename to search for
+      filename <- basename(web_path)
+      cat("      Looking for file:", filename, "\n")
+      
+      # Search in tempdir() and its subdirectories
+      temp_base <- tempdir()
+      cat("      Searching in:", temp_base, "\n")
+      
+      # List all subdirectories in tempdir
+      temp_dirs <- list.dirs(temp_base, full.names = TRUE, recursive = TRUE)
+      
+      # Search for the file in all temp directories
+      for (dir in temp_dirs) {
+        possible_path <- file.path(dir, cleaned_path)
+        if (file.exists(possible_path)) {
+          real_path <- normalizePath(possible_path, winslash = "/")
+          cat("      ✅ Found file:", real_path, "\n")
+          return(real_path)
+        }
+      }
+      
+      # If not found with cleaned path, search by filename only
+      cat("      ⚠ Not found with relative path, searching by filename only...\n")
+      for (dir in temp_dirs) {
+        files <- list.files(dir, pattern = filename, full.names = TRUE, recursive = FALSE)
+        if (length(files) > 0) {
+          real_path <- normalizePath(files[1], winslash = "/")
+          cat("      ✅ Found file:", real_path, "\n")
+          return(real_path)
+        }
+      }
+      
+      # Last resort: check working directory
+      wd_path <- file.path(getwd(), web_path)
+      if (file.exists(wd_path)) {
+        real_path <- normalizePath(wd_path, winslash = "/")
+        cat("      ✅ Found in working directory:", real_path, "\n")
+        return(real_path)
+      }
+      
+      cat("      ❌ File not found anywhere\n")
+      return(NULL)
+    }
+    
+    # Draft management functions (kept simple)
+    save_current_draft <- function(idx) {
+      draft_key <- as.character(idx)
+      rv$image_drafts[[draft_key]] <- list(
+        title = input[[paste0("item_title_", idx)]] %||% "",
+        description = input[[paste0("item_description_", idx)]] %||% "",
+        price = input[[paste0("starting_price_", idx)]] %||% 2.50,
+        condition = input[[paste0("condition_", idx)]] %||% "used",
+        ai_extracted = TRUE,
+        timestamp = Sys.time()
+      )
+    }
+    
+    # AI Extraction Handlers - Create observers for each image's Extract AI button
+    observe({
+      req(image_paths())
+      paths <- image_paths()
+      
+      lapply(seq_along(paths), function(i) {
+        observeEvent(input[[paste0("extract_ai_", i)]], {
+          
+          cat("\n🎯 Extract AI button clicked for image", i, "\n")
+          
+          # Get current path and model
+          current_path <- paths[i]
+          selected_model <- input[[paste0("ai_model_", i)]] %||% "claude"
+          
+          cat("   Path:", current_path, "\n")
+          cat("   Model:", selected_model, "\n")
+          
+          # Get LLM config
+          config <- get_llm_config()
+          
+          # Validate API key exists
+          api_key <- if (selected_model == "claude") {
+            config$claude_api_key
+          } else {
+            config$openai_api_key
+          }
+          
+          if (is.null(api_key) || api_key == "") {
+            cat("   ❌ No API key configured for", selected_model, "\n")
+            output[[paste0("ai_status_", i)]] <- renderUI({
+              div(
+                style = "padding: 12px; background: #fff3cd; border-left: 4px solid #ffc107; margin-top: 10px;",
+                icon("exclamation-triangle", style = "color: #856404;"),
+                sprintf(" Please configure %s API key in Settings menu", 
+                        if(selected_model == "claude") "Claude" else "OpenAI")
+              )
+            })
+            return()
+          }
+          
+          cat("   ✅ API key found, length:", nchar(api_key), "\n")
+          
+          # Set extracting state
+          isolate({
+            rv$ai_extracting <- TRUE
+            rv$current_image_index <- i
+          })
+          
+          # Show progress
+          output[[paste0("ai_status_", i)]] <- renderUI({
+            div(
+              style = "padding: 12px; background: #e3f2fd; border-left: 4px solid #2196f3; margin-top: 10px;",
+              icon("spinner", class = "fa-spin", style = "color: #1976d2;"),
+              sprintf(" Extracting with %s...", if(selected_model == "claude") "Claude" else "GPT-4")
+            )
+          })
+          
+          # Call AI API asynchronously
+          later::later(function() {
+            tryCatch({
+              cat("\n🔍 Starting AI extraction in later::later()\n")
+              
+              # Convert web path to actual file system path
+              actual_path <- convert_web_path_to_file_path(current_path)
+              
+              if (is.null(actual_path) || !file.exists(actual_path)) {
+                cat("   ❌ Could not find image file\n")
+                output[[paste0("ai_status_", i)]] <- renderUI({
+                  div(
+                    style = "padding: 12px; background: #ffebee; border-left: 4px solid #f44336; margin-top: 10px;",
+                    icon("exclamation-circle", style = "color: #c62828;"),
+                    " Error: Could not locate image file for AI processing"
+                  )
+                })
+                isolate({ rv$ai_extracting <- FALSE })
+                return()
+              }
+              
+              # Build enhanced prompt with price recommendation
+              prompt <- build_enhanced_postal_card_prompt(
+                extraction_type = if(image_type == "lot") "lot" else "individual",
+                card_count = 1
+              )
+              
+              cat("   Prompt built, calling API...\n")
+              
+              # Call appropriate API (using actual file path)
+              result <- if (selected_model == "claude") {
+                call_claude_api(
+                  image_path = actual_path,
+                  model_name = config$default_model,
+                  api_key = api_key,
+                  prompt = prompt,
+                  temperature = config$temperature %||% 0.0,
+                  max_tokens = config$max_tokens %||% 1000
+                )
+              } else {
+                call_openai_api(
+                  image_path = actual_path,
+                  model_name = "gpt-4o",
+                  api_key = api_key,
+                  prompt = prompt,
+                  temperature = config$temperature %||% 0.0,
+                  max_tokens = config$max_tokens %||% 1000
+                )
+              }
+              
+              cat("   API call complete, success:", result$success, "\n")
+              
+              if (result$success) {
+                # Debug: Log raw AI response
+                cat("\n   📄 Raw AI Response:\n")
+                cat("   ", paste(rep("-", 60), collapse=""), "\n")
+                cat(result$content, "\n")
+                cat("   ", paste(rep("-", 60), collapse=""), "\n\n")
+                
+                # Parse enhanced response with price
+                parsed <- parse_enhanced_ai_response(result$content)
+                
+                cat("   ✅ Parsing successful\n")
+                cat("      Title:", substr(parsed$title, 1, 50), "...\n")
+                cat("      Description:", substr(parsed$description, 1, 100), "...\n")
+                cat("      Condition:", parsed$condition, "\n")
+                cat("      Price: €", parsed$price, "\n")
+                
+                # Auto-fill form fields (both title and description are now textAreaInput)
+                cat("   📝 Updating form fields...\n")
+                
+                # Update title (now a textAreaInput)
+                shiny::updateTextAreaInput(session, paste0("item_title_", i), value = parsed$title)
+                cat("      Title updated (length:", nchar(parsed$title), ")\n")
+                
+                # Update description
+                shiny::updateTextAreaInput(session, paste0("item_description_", i), value = parsed$description)
+                cat("      Description updated (length:", nchar(parsed$description), ")\n")
+                
+                updateNumericInput(session, paste0("starting_price_", i), value = parsed$price)
+                cat("      Price updated\n")
+                
+                updateSelectInput(session, paste0("condition_", i), selected = parsed$condition)
+                cat("      Condition updated\n")
+                
+                # Save draft
+                draft_key <- as.character(i)
+                isolate({
+                  rv$image_drafts[[draft_key]] <- list(
+                    title = parsed$title,
+                    description = parsed$description,
+                    price = parsed$price,
+                    condition = parsed$condition,
+                    ai_extracted = TRUE,
+                    timestamp = Sys.time()
+                  )
+                })
+                
+                cat("   💾 Draft saved\n")
+                
+                # Note: Accordion color change would require JavaScript in later() context
+                # which has caused issues before (see showNotification problems)
+                # Skipping visual indicator to keep code simple and reliable
+                
+                # Show success
+                output[[paste0("ai_status_", i)]] <- renderUI({
+                  div(
+                    style = "padding: 12px; background: #e8f5e9; border-left: 4px solid #4caf50; margin-top: 10px;",
+                    icon("check-circle", style = "color: #2e7d32;"),
+                    sprintf(" Extraction complete! Recommended price: €%.2f", parsed$price)
+                  )
+                })
+                
+              } else {
+                # Show error
+                cat("   ❌ API error:", result$error, "\n")
+                output[[paste0("ai_status_", i)]] <- renderUI({
+                  div(
+                    style = "padding: 12px; background: #ffebee; border-left: 4px solid #f44336; margin-top: 10px;",
+                    icon("exclamation-circle", style = "color: #c62828;"),
+                    paste(" Error:", result$error)
+                  )
+                })
+              }
+            }, error = function(e) {
+              cat("   💥 Unexpected error:", e$message, "\n")
+              output[[paste0("ai_status_", i)]] <- renderUI({
+                div(
+                  style = "padding: 12px; background: #ffebee; border-left: 4px solid #f44336; margin-top: 10px;",
+                  icon("exclamation-circle", style = "color: #c62828;"),
+                  paste(" Unexpected error:", e$message)
+                )
+              })
+            }, finally = {
+              isolate({ rv$ai_extracting <- FALSE })
+              cat("   🏁 AI extraction complete\n\n")
+            })
+          }, delay = 0.1)
+        })
+      })
     })
     
     # Return module interface
     return(list(
       get_sent_count = reactive(length(rv$sent_images)),
       get_pending_count = reactive(length(rv$pending_images)),
-      get_failed_count = reactive(length(rv$failed_images)),
-      reset_status = function() {
-        rv$sent_images <- character(0)
-        rv$pending_images <- character(0)
-        rv$failed_images <- character(0)
-      }
+      get_failed_count = reactive(length(rv$failed_images))
     ))
   })
 }
