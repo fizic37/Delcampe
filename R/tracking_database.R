@@ -300,10 +300,10 @@ save_card_processing <- function(card_id, crop_paths, h_boundaries, v_boundaries
     on.exit(DBI::dbDisconnect(con), add = TRUE)
     
     # Convert to JSON - ensure single character strings for SQL parameters
-    # Handle NULL values properly - don't convert NULL to JSON
-    crop_paths_json <- if (!is.null(crop_paths)) as.character(jsonlite::toJSON(crop_paths, auto_unbox = FALSE))[1] else NULL
-    h_bound_json <- if (!is.null(h_boundaries)) as.character(jsonlite::toJSON(h_boundaries, auto_unbox = FALSE))[1] else NULL
-    v_bound_json <- if (!is.null(v_boundaries)) as.character(jsonlite::toJSON(v_boundaries, auto_unbox = FALSE))[1] else NULL
+    # Handle NULL values properly - convert to NA_character_ for database (scalar values)
+    crop_paths_json <- if (!is.null(crop_paths)) as.character(jsonlite::toJSON(crop_paths, auto_unbox = FALSE))[1] else NA_character_
+    h_bound_json <- if (!is.null(h_boundaries)) as.character(jsonlite::toJSON(h_boundaries, auto_unbox = FALSE))[1] else NA_character_
+    v_bound_json <- if (!is.null(v_boundaries)) as.character(jsonlite::toJSON(v_boundaries, auto_unbox = FALSE))[1] else NA_character_
     
     # Check if processing record exists
     existing <- DBI::dbGetQuery(con, "
@@ -390,9 +390,9 @@ save_card_processing <- function(card_id, crop_paths, h_boundaries, v_boundaries
         crop_paths_json,
         h_bound_json,
         v_bound_json,
-        as.integer(grid_rows),
-        as.integer(grid_cols),
-        as.character(extraction_dir),
+        if (!is.null(grid_rows)) as.integer(grid_rows) else NA_integer_,
+        if (!is.null(grid_cols)) as.integer(grid_cols) else NA_integer_,
+        if (!is.null(extraction_dir)) as.character(extraction_dir) else NA_character_,
         if (!is.null(ai_data) && !is.null(ai_data$title)) ai_data$title else NA_character_,
         if (!is.null(ai_data) && !is.null(ai_data$description)) ai_data$description else NA_character_,
         if (!is.null(ai_data) && !is.null(ai_data$condition)) ai_data$condition else NA_character_,

@@ -328,99 +328,184 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
       )
     }
     
-    # Pre-populate form fields with existing AI data from card_processing table
-    # This loads AI data that was previously extracted for combined images
+    # Store existing AI data for each image (to be used when accordion opens)
+    existing_ai_data <- reactiveVal(list())
+
+    # Pre-load existing AI data from database (runs once when images load)
     observe({
       req(image_paths())
       paths <- image_paths()
       file_paths <- image_file_paths()
 
-      lapply(seq_along(paths), function(i) {
+      cat("\n=== PRE-LOADING AI DATA FROM DATABASE ===\n")
+      cat("   Number of images:", length(paths), "\n")
+
+      ai_data_list <- lapply(seq_along(paths), function(i) {
+        cat("\n   --- Checking image", i, "for existing AI data ---\n")
+        cat("      Web path:", paths[i], "\n")
+
         # Get the actual file path to calculate hash
         actual_path <- if (!is.null(file_paths) && i <= length(file_paths)) {
+          cat("      Using image_file_paths mapping\n")
           file_paths[i]
         } else {
+          cat("      No file_paths mapping, converting web path\n")
           convert_web_path_to_file_path(paths[i])
         }
 
+        cat("      Actual path:", if(is.null(actual_path)) "NULL" else actual_path, "\n")
+        cat("      File exists:", if(is.null(actual_path)) FALSE else file.exists(actual_path), "\n")
+
         if (is.null(actual_path) || !file.exists(actual_path)) {
-          cat("   ⚠️ Cannot pre-populate image", i, "- file not found\n")
+          cat("      ⚠️ Cannot pre-populate - file not found\n")
           return(NULL)
         }
 
         # Calculate hash to check for existing AI data
+        cat("      Calculating hash...\n")
         image_hash <- calculate_image_hash(actual_path)
+        cat("      Hash:", if(is.null(image_hash)) "NULL" else image_hash, "\n")
+
         if (is.null(image_hash)) {
-          cat("   ⚠️ Cannot calculate hash for image", i, "\n")
+          cat("      ⚠️ Cannot calculate hash\n")
           return(NULL)
         }
 
         # Check for existing card processing with AI data (combined images)
+        cat("      Querying database for existing AI data (image_type='combined')...\n")
         existing <- find_card_processing(image_hash, "combined")
 
-        if (!is.null(existing) && !is.null(existing$ai_title) && existing$ai_title != "") {
-          cat("   ✨ Found existing AI data for image", i, "\n")
-          cat("      Card ID:", existing$card_id, "\n")
-          cat("      Title:", substr(existing$ai_title, 1, 50), "...\n")
+        cat("      Database lookup result:\n")
+        if (is.null(existing)) {
+          cat("         ❌ No existing card found\n")
+        } else {
+          cat("         ✅ Found card_id:", existing$card_id, "\n")
+          cat("         - ai_title:", if(is.null(existing$ai_title)) "NULL" else substr(existing$ai_title, 1, 50), "\n")
+          cat("         - ai_description:", if(is.null(existing$ai_description)) "NULL" else paste0(nchar(existing$ai_description), " chars"), "\n")
+          cat("         - ai_price:", if(is.null(existing$ai_price)) "NULL" else existing$ai_price, "\n")
+          cat("         - ai_condition:", if(is.null(existing$ai_condition)) "NULL" else existing$ai_condition, "\n")
+          cat("         - ai_model:", if(is.null(existing$ai_model)) "NULL" else existing$ai_model, "\n")
+        }
 
-          # Pre-populate form fields with existing data
-          tryCatch({
-            # Update title
-            if (!is.null(existing$ai_title) && existing$ai_title != "") {
-              updateTextAreaInput(session, paste0("item_title_", i), value = existing$ai_title)
-              cat("      ✓ Title populated\n")
-            }
+        # Check if AI data actually exists (not NULL and not NA)
+        has_ai_data <- !is.null(existing) &&
+                       !is.null(existing$ai_title) &&
+                       !is.na(existing$ai_title) &&
+                       nchar(as.character(existing$ai_title)) > 0
 
-            # Update description
-            if (!is.null(existing$ai_description) && existing$ai_description != "") {
-              updateTextAreaInput(session, paste0("item_description_", i), value = existing$ai_description)
-              cat("      ✓ Description populated\n")
-            }
+        if (has_ai_data) {
+          cat("      ✨ Found existing AI data - storing for later\n")
 
-            # Update price
-            if (!is.null(existing$ai_price) && !is.na(existing$ai_price)) {
-              updateNumericInput(session, paste0("starting_price_", i), value = existing$ai_price)
-              cat("      ✓ Price populated\n")
-            }
-
-            # Update condition
-            if (!is.null(existing$ai_condition) && existing$ai_condition != "") {
-              updateSelectInput(session, paste0("condition_", i), selected = existing$ai_condition)
-              cat("      ✓ Condition populated\n")
-            }
-
-            # Save as draft
-            draft_key <- as.character(i)
-            isolate({
-              rv$image_drafts[[draft_key]] <- list(
-                title = existing$ai_title,
-                description = existing$ai_description,
-                price = existing$ai_price,
-                condition = existing$ai_condition,
-                ai_extracted = TRUE,
-                pre_populated = TRUE,
-                timestamp = Sys.time()
-              )
-            })
-
-            cat("      💾 Draft saved with existing data\n")
-
-            # Show success status
-            output[[paste0("ai_status_", i)]] <- renderUI({
-              div(
-                style = "padding: 12px; background: #e8f5e9; border-left: 4px solid #4caf50; margin-top: 10px;",
-                icon("check-circle", style = "color: #2e7d32;"),
-                sprintf(" Previous AI extraction loaded (Model: %s)", existing$ai_model %||% "Unknown")
-              )
-            })
-
-          }, error = function(e) {
-            cat("   ❌ Error populating fields:", e$message, "\n")
+          # Save as draft immediately
+          draft_key <- as.character(i)
+          isolate({
+            rv$image_drafts[[draft_key]] <- list(
+              title = existing$ai_title,
+              description = existing$ai_description,
+              price = existing$ai_price,
+              condition = existing$ai_condition,
+              ai_extracted = TRUE,
+              pre_populated = TRUE,
+              timestamp = Sys.time()
+            )
           })
+
+          # Return the AI data for this image
+          return(list(
+            index = i,
+            has_data = TRUE,
+            ai_title = existing$ai_title,
+            ai_description = existing$ai_description,
+            ai_price = existing$ai_price,
+            ai_condition = existing$ai_condition,
+            ai_model = existing$ai_model
+          ))
         } else {
           cat("   ℹ️ No existing AI data found for image", i, "\n")
+          return(list(index = i, has_data = FALSE))
         }
       })
+
+      # Store the AI data list
+      existing_ai_data(ai_data_list)
+      cat("=== AI DATA PRE-LOAD COMPLETE ===\n\n")
+    })
+
+    # Populate fields when accordion panel opens
+    observeEvent(input$export_accordion, {
+      opened_panel <- input$export_accordion
+
+      if (is.null(opened_panel) || length(opened_panel) == 0) {
+        return()
+      }
+
+      cat("\n=== ACCORDION PANEL OPENED ===\n")
+      cat("   Panel:", opened_panel, "\n")
+
+      # Extract image index from panel value (e.g., "panel_1" -> 1)
+      panel_match <- regexpr("panel_(\\d+)", opened_panel, perl = TRUE)
+      if (panel_match > 0) {
+        i <- as.integer(sub("panel_", "", opened_panel))
+        cat("   Image index:", i, "\n")
+
+        # Get AI data for this image
+        ai_data_list <- existing_ai_data()
+        if (!is.null(ai_data_list) && i <= length(ai_data_list)) {
+          ai_data <- ai_data_list[[i]]
+
+          if (!is.null(ai_data) && isTRUE(ai_data$has_data)) {
+            cat("   ✨ Found AI data for image", i, "- populating fields with delay\n")
+
+            # Use later::later() to ensure UI is rendered before updating
+            later::later(function() {
+              tryCatch({
+                cat("   🔄 Delayed update triggered for image", i, "\n")
+
+                # Update title
+                if (!is.null(ai_data$ai_title) && !is.na(ai_data$ai_title)) {
+                  updateTextAreaInput(session, paste0("item_title_", i), value = ai_data$ai_title)
+                  cat("   ✓ Title populated\n")
+                }
+
+                # Update description
+                if (!is.null(ai_data$ai_description) && !is.na(ai_data$ai_description)) {
+                  updateTextAreaInput(session, paste0("item_description_", i), value = ai_data$ai_description)
+                  cat("   ✓ Description populated\n")
+                }
+
+                # Update price
+                if (!is.null(ai_data$ai_price) && !is.na(ai_data$ai_price)) {
+                  updateNumericInput(session, paste0("starting_price_", i), value = ai_data$ai_price)
+                  cat("   ✓ Price populated\n")
+                }
+
+                # Update condition
+                if (!is.null(ai_data$ai_condition) && !is.na(ai_data$ai_condition)) {
+                  updateSelectInput(session, paste0("condition_", i), selected = ai_data$ai_condition)
+                  cat("   ✓ Condition populated\n")
+                }
+
+                # Show success status
+                output[[paste0("ai_status_", i)]] <- renderUI({
+                  div(
+                    style = "padding: 12px; background: #e8f5e9; border-left: 4px solid #4caf50; margin-top: 10px;",
+                    icon("check-circle", style = "color: #2e7d32;"),
+                    sprintf(" Previous AI extraction loaded (Model: %s)", ai_data$ai_model %||% "Unknown")
+                  )
+                })
+
+                cat("   ✅ Field updates complete\n")
+
+              }, error = function(e) {
+                cat("   ❌ Error populating fields:", e$message, "\n")
+              })
+            }, delay = 0.15)  # 150ms delay to allow UI to render
+
+          } else {
+            cat("   ℹ️ No AI data to populate for image", i, "\n")
+          }
+        }
+      }
     })
 
     # Render AI buttons dynamically based on extraction history
@@ -624,8 +709,119 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
                 })
                 
                 cat("   💾 Draft saved\n")
-                
-                # Track AI extraction in database
+
+                # Save AI data to card_processing table for pre-population on next upload
+                cat("\n=== SAVING AI DATA TO DATABASE ===\n")
+                tryCatch({
+                  cat("   Step 1: Calculate hash for file:", actual_path, "\n")
+
+                  # Calculate hash to find card_id
+                  image_hash <- calculate_image_hash(actual_path)
+                  cat("   Hash result:", if(is.null(image_hash)) "NULL" else image_hash, "\n")
+
+                  if (!is.null(image_hash)) {
+                    cat("   Step 2: Looking up card_id from postal_cards table\n")
+
+                    # First, get card_id from postal_cards directly (not using find_card_processing)
+                    # because combined images may not have a card_processing record yet
+                    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+                    on.exit(DBI::dbDisconnect(con), add = TRUE)
+
+                    card_result <- DBI::dbGetQuery(con, "
+                      SELECT card_id FROM postal_cards
+                      WHERE file_hash = ? AND image_type = ?
+                    ", list(image_hash, "combined"))
+
+                    cat("   Query result:\n")
+                    if (nrow(card_result) == 0) {
+                      cat("      ❌ No card found in postal_cards\n")
+                      cat("         Hash:", image_hash, "\n")
+                      cat("         Type: combined\n")
+                      cat("         This means the combined image wasn't tracked when created!\n")
+                    } else {
+                      cat("      ✅ Found card_id:", card_result$card_id[1], "\n")
+                    }
+
+                    if (nrow(card_result) > 0) {
+                      card_id <- card_result$card_id[1]
+
+                      # Now check if a card_processing record exists
+                      cat("   Step 3: Checking if card_processing record exists\n")
+                      existing_processing <- find_card_processing(image_hash, "combined")
+
+                      if (is.null(existing_processing)) {
+                        cat("      ⚠️ No card_processing record exists - will be created\n")
+                      } else {
+                        cat("      ✅ card_processing record exists\n")
+                        cat("         Has AI data:", !is.null(existing_processing$ai_title), "\n")
+                      }
+
+                      cat("   Step 4: Preparing AI data to save\n")
+
+                      # Save AI data to card_processing table
+                      ai_data <- list(
+                        title = parsed$title,
+                        description = parsed$description,
+                        condition = parsed$condition,
+                        price = parsed$price,
+                        model = if(selected_model == "claude") config$default_model else "gpt-4o"
+                      )
+
+                      cat("      AI data prepared:\n")
+                      cat("         - Title:", substr(ai_data$title, 1, 50), "...\n")
+                      cat("         - Description length:", nchar(ai_data$description), "chars\n")
+                      cat("         - Condition:", ai_data$condition, "\n")
+                      cat("         - Price:", ai_data$price, "\n")
+                      cat("         - Model:", ai_data$model, "\n")
+
+                      cat("   Step 5: Calling save_card_processing()\n")
+                      save_success <- save_card_processing(
+                        card_id = card_id,  # Use card_id from postal_cards query
+                        crop_paths = NULL,  # Not updating crops, just AI data
+                        h_boundaries = NULL,
+                        v_boundaries = NULL,
+                        grid_rows = NULL,
+                        grid_cols = NULL,
+                        extraction_dir = NULL,
+                        ai_data = ai_data
+                      )
+
+                      cat("   Save result:", save_success, "\n")
+
+                      if (save_success) {
+                        cat("   ✅ AI data saved to card_processing (card_id:", card_id, ")\n")
+
+                        # Verify the save by reading back
+                        cat("   Step 6: Verifying save by reading back from database\n")
+                        verify <- find_card_processing(image_hash, "combined")
+                        if (!is.null(verify)) {
+                          cat("      Verification successful:\n")
+                          cat("         - ai_title:", if(is.null(verify$ai_title)) "NULL" else substr(verify$ai_title, 1, 50), "\n")
+                          cat("         - ai_price:", if(is.null(verify$ai_price)) "NULL" else verify$ai_price, "\n")
+                          cat("         - ai_condition:", if(is.null(verify$ai_condition)) "NULL" else verify$ai_condition, "\n")
+                          cat("         - ai_model:", if(is.null(verify$ai_model)) "NULL" else verify$ai_model, "\n")
+                        } else {
+                          cat("      ⚠️ Verification failed - could not read back data\n")
+                          cat("         This might be OK if it's the first save (no last_processed yet)\n")
+                        }
+                      } else {
+                        cat("   ❌ save_card_processing() returned FALSE\n")
+                      }
+                    } else {
+                      cat("   ❌ No card found in postal_cards table\n")
+                      cat("      This means combined image wasn't tracked when created\n")
+                    }
+                  } else {
+                    cat("   ❌ Could not calculate hash for file\n")
+                  }
+                }, error = function(e) {
+                  cat("   💥 ERROR in save AI data block:\n")
+                  cat("      Message:", e$message, "\n")
+                  cat("      Call:", deparse(e$call), "\n")
+                })
+                cat("=== END SAVING AI DATA ===\n\n")
+
+                # Track AI extraction in legacy ai_extractions table
                 tryCatch({
                   image_id <- get_image_by_path(current_path)
                   if (!is.null(image_id)) {
