@@ -2,7 +2,7 @@
 % Please edit documentation in R/tracking_database.R
 \name{save_uploaded_image}
 \alias{save_uploaded_image}
-\title{Save uploaded image - FIXED VERSION}
+\title{Save uploaded image}
 \usage{
 save_uploaded_image(
   file_info,
@@ -19,7 +19,7 @@ save_uploaded_image(
 
 \item{session_id}{Session identifier}
 
-\item{content_category}{Content category ("cards", "stamps", etc.)}
+\item{content_category}{Content category}
 
 \item{image_type}{Type ('face', 'verso')}
 }
@@ -27,5 +27,5 @@ save_uploaded_image(
 List with image_id and file_path
 }
 \description{
-Save uploaded image - FIXED VERSION
+Save uploaded image
 }

@@ -2,7 +2,7 @@
 % Please edit documentation in R/tracking_database.R
 \name{get_tracking_statistics}
 \alias{get_tracking_statistics}
-\title{Get tracking statistics - FIXED VERSION}
+\title{Get tracking statistics}
 \usage{
 get_tracking_statistics()
 }
@@ -10,5 +10,5 @@ get_tracking_statistics()
 List with tracking statistics
 }
 \description{
-Get tracking statistics - FIXED VERSION
+Get tracking statistics
 }

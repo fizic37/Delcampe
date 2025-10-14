@@ -20,11 +20,12 @@ mod_delcampe_export_ui <- function(id) {
 
 #' Delcampe Export Server Functions
 #'
-#' @param image_paths Reactive containing vector of image paths
+#' @param image_paths Reactive containing vector of image web URLs
+#' @param image_file_paths Reactive containing vector of actual file system paths (optional)
 #' @param image_type Character string ("lot" or "combined") to distinguish image types
 #'
 #' @noRd
-mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_type = "combined") {
+mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_file_paths = reactive(NULL), image_type = "combined") {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
@@ -168,13 +169,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_t
                 selected = "claude",
                 width = "100%"
               ),
-              actionButton(
-                ns(paste0("extract_ai_", idx)),
-                "Extract with AI",
-                icon = icon("wand-magic-sparkles"),
-                class = "btn-primary",
-                style = "width: 100%; margin-top: 10px;"
-              )
+              uiOutput(ns(paste0("ai_button_", idx)))
             )
           )
         ),
@@ -333,6 +328,138 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_t
       )
     }
     
+    # Pre-populate form fields with existing AI data from card_processing table
+    # This loads AI data that was previously extracted for combined images
+    observe({
+      req(image_paths())
+      paths <- image_paths()
+      file_paths <- image_file_paths()
+
+      lapply(seq_along(paths), function(i) {
+        # Get the actual file path to calculate hash
+        actual_path <- if (!is.null(file_paths) && i <= length(file_paths)) {
+          file_paths[i]
+        } else {
+          convert_web_path_to_file_path(paths[i])
+        }
+
+        if (is.null(actual_path) || !file.exists(actual_path)) {
+          cat("   ⚠️ Cannot pre-populate image", i, "- file not found\n")
+          return(NULL)
+        }
+
+        # Calculate hash to check for existing AI data
+        image_hash <- calculate_image_hash(actual_path)
+        if (is.null(image_hash)) {
+          cat("   ⚠️ Cannot calculate hash for image", i, "\n")
+          return(NULL)
+        }
+
+        # Check for existing card processing with AI data (combined images)
+        existing <- find_card_processing(image_hash, "combined")
+
+        if (!is.null(existing) && !is.null(existing$ai_title) && existing$ai_title != "") {
+          cat("   ✨ Found existing AI data for image", i, "\n")
+          cat("      Card ID:", existing$card_id, "\n")
+          cat("      Title:", substr(existing$ai_title, 1, 50), "...\n")
+
+          # Pre-populate form fields with existing data
+          tryCatch({
+            # Update title
+            if (!is.null(existing$ai_title) && existing$ai_title != "") {
+              updateTextAreaInput(session, paste0("item_title_", i), value = existing$ai_title)
+              cat("      ✓ Title populated\n")
+            }
+
+            # Update description
+            if (!is.null(existing$ai_description) && existing$ai_description != "") {
+              updateTextAreaInput(session, paste0("item_description_", i), value = existing$ai_description)
+              cat("      ✓ Description populated\n")
+            }
+
+            # Update price
+            if (!is.null(existing$ai_price) && !is.na(existing$ai_price)) {
+              updateNumericInput(session, paste0("starting_price_", i), value = existing$ai_price)
+              cat("      ✓ Price populated\n")
+            }
+
+            # Update condition
+            if (!is.null(existing$ai_condition) && existing$ai_condition != "") {
+              updateSelectInput(session, paste0("condition_", i), selected = existing$ai_condition)
+              cat("      ✓ Condition populated\n")
+            }
+
+            # Save as draft
+            draft_key <- as.character(i)
+            isolate({
+              rv$image_drafts[[draft_key]] <- list(
+                title = existing$ai_title,
+                description = existing$ai_description,
+                price = existing$ai_price,
+                condition = existing$ai_condition,
+                ai_extracted = TRUE,
+                pre_populated = TRUE,
+                timestamp = Sys.time()
+              )
+            })
+
+            cat("      💾 Draft saved with existing data\n")
+
+            # Show success status
+            output[[paste0("ai_status_", i)]] <- renderUI({
+              div(
+                style = "padding: 12px; background: #e8f5e9; border-left: 4px solid #4caf50; margin-top: 10px;",
+                icon("check-circle", style = "color: #2e7d32;"),
+                sprintf(" Previous AI extraction loaded (Model: %s)", existing$ai_model %||% "Unknown")
+              )
+            })
+
+          }, error = function(e) {
+            cat("   ❌ Error populating fields:", e$message, "\n")
+          })
+        } else {
+          cat("   ℹ️ No existing AI data found for image", i, "\n")
+        }
+      })
+    })
+
+    # Render AI buttons dynamically based on extraction history
+    observe({
+      req(image_paths())
+      paths <- image_paths()
+
+      lapply(seq_along(paths), function(i) {
+        output[[paste0("ai_button_", i)]] <- renderUI({
+          # Get image ID from path to check extraction history
+          image_id <- get_image_by_path(paths[i])
+
+          button_label <- "Extract with AI"
+          button_icon <- icon("wand-magic-sparkles")
+          button_class <- "btn-primary"
+
+          if (!is.null(image_id)) {
+            # Check if there's a previous extraction
+            history <- get_ai_extraction_history(image_id)
+
+            if (nrow(history) > 0) {
+              # There's a previous extraction
+              button_label <- "Re-extract with AI"
+              button_icon <- icon("rotate")
+              button_class <- "btn-warning"
+            }
+          }
+
+          actionButton(
+            ns(paste0("extract_ai_", i)),
+            button_label,
+            icon = button_icon,
+            class = button_class,
+            style = "width: 100%; margin-top: 10px;"
+          )
+        })
+      })
+    })
+    
     # AI Extraction Handlers - Create observers for each image's Extract AI button
     observe({
       req(image_paths())
@@ -340,47 +467,47 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_t
       
       lapply(seq_along(paths), function(i) {
         observeEvent(input[[paste0("extract_ai_", i)]], {
-          
+
           cat("\n🎯 Extract AI button clicked for image", i, "\n")
-          
+
           # Get current path and model
           current_path <- paths[i]
           selected_model <- input[[paste0("ai_model_", i)]] %||% "claude"
-          
+
           cat("   Path:", current_path, "\n")
           cat("   Model:", selected_model, "\n")
-          
+
           # Get LLM config
           config <- get_llm_config()
-          
+
           # Validate API key exists
           api_key <- if (selected_model == "claude") {
             config$claude_api_key
           } else {
             config$openai_api_key
           }
-          
+
           if (is.null(api_key) || api_key == "") {
             cat("   ❌ No API key configured for", selected_model, "\n")
             output[[paste0("ai_status_", i)]] <- renderUI({
               div(
                 style = "padding: 12px; background: #fff3cd; border-left: 4px solid #ffc107; margin-top: 10px;",
                 icon("exclamation-triangle", style = "color: #856404;"),
-                sprintf(" Please configure %s API key in Settings menu", 
+                sprintf(" Please configure %s API key in Settings menu",
                         if(selected_model == "claude") "Claude" else "OpenAI")
               )
             })
             return()
           }
-          
+
           cat("   ✅ API key found, length:", nchar(api_key), "\n")
-          
+
           # Set extracting state
           isolate({
             rv$ai_extracting <- TRUE
             rv$current_image_index <- i
           })
-          
+
           # Show progress
           output[[paste0("ai_status_", i)]] <- renderUI({
             div(
@@ -389,17 +516,23 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_t
               sprintf(" Extracting with %s...", if(selected_model == "claude") "Claude" else "GPT-4")
             )
           })
-          
-          # Call AI API asynchronously
-          later::later(function() {
-            tryCatch({
-              cat("\n🔍 Starting AI extraction in later::later()\n")
-              
-              # Convert web path to actual file system path
-              actual_path <- convert_web_path_to_file_path(current_path)
-              
+
+          # Call AI API directly (no later::later() - it breaks namespace context for form updates)
+          tryCatch({
+            cat("\n🔍 Starting AI extraction\n")
+
+              # Get actual file system path from mapping (if provided)
+              file_paths <- image_file_paths()
+              actual_path <- if (!is.null(file_paths) && i <= length(file_paths)) {
+                file_paths[i]
+              } else {
+                # Fallback to old conversion method if no mapping provided
+                convert_web_path_to_file_path(current_path)
+              }
+
               if (is.null(actual_path) || !file.exists(actual_path)) {
                 cat("   ❌ Could not find image file\n")
+                cat("      Attempted path:", actual_path, "\n")
                 output[[paste0("ai_status_", i)]] <- renderUI({
                   div(
                     style = "padding: 12px; background: #ffebee; border-left: 4px solid #f44336; margin-top: 10px;",
@@ -410,6 +543,8 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_t
                 isolate({ rv$ai_extracting <- FALSE })
                 return()
               }
+
+              cat("   ✅ Using file path:", actual_path, "\n")
               
               # Build enhanced prompt with price recommendation
               prompt <- build_enhanced_postal_card_prompt(
@@ -460,18 +595,18 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_t
                 
                 # Auto-fill form fields (both title and description are now textAreaInput)
                 cat("   📝 Updating form fields...\n")
-                
+
                 # Update title (now a textAreaInput)
                 shiny::updateTextAreaInput(session, paste0("item_title_", i), value = parsed$title)
                 cat("      Title updated (length:", nchar(parsed$title), ")\n")
-                
+
                 # Update description
                 shiny::updateTextAreaInput(session, paste0("item_description_", i), value = parsed$description)
                 cat("      Description updated (length:", nchar(parsed$description), ")\n")
-                
+
                 updateNumericInput(session, paste0("starting_price_", i), value = parsed$price)
                 cat("      Price updated\n")
-                
+
                 updateSelectInput(session, paste0("condition_", i), selected = parsed$condition)
                 cat("      Condition updated\n")
                 
@@ -490,6 +625,27 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_t
                 
                 cat("   💾 Draft saved\n")
                 
+                # Track AI extraction in database
+                tryCatch({
+                  image_id <- get_image_by_path(current_path)
+                  if (!is.null(image_id)) {
+                    extraction_id <- track_ai_extraction(
+                      image_id = image_id,
+                      model = if(selected_model == "claude") config$default_model else "gpt-4o",
+                      title = parsed$title,
+                      description = parsed$description,
+                      condition = parsed$condition,
+                      recommended_price = parsed$price,
+                      success = TRUE
+                    )
+                    cat("   📊 Extraction tracked with ID:", extraction_id, "\n")
+                  } else {
+                    cat("   ⚠️ Could not find image_id for tracking\n")
+                  }
+                }, error = function(e) {
+                  cat("   ⚠️ Failed to track extraction:", e$message, "\n")
+                })
+                
                 # Note: Accordion color change would require JavaScript in later() context
                 # which has caused issues before (see showNotification problems)
                 # Skipping visual indicator to keep code simple and reliable
@@ -504,6 +660,22 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_t
                 })
                 
               } else {
+                # Track failed extraction
+                tryCatch({
+                  image_id <- get_image_by_path(current_path)
+                  if (!is.null(image_id)) {
+                    track_ai_extraction(
+                      image_id = image_id,
+                      model = if(selected_model == "claude") config$default_model else "gpt-4o",
+                      success = FALSE,
+                      error_message = result$error
+                    )
+                    cat("   📊 Failed extraction tracked\n")
+                  }
+                }, error = function(e) {
+                  cat("   ⚠️ Failed to track error:", e$message, "\n")
+                })
+                
                 # Show error
                 cat("   ❌ API error:", result$error, "\n")
                 output[[paste0("ai_status_", i)]] <- renderUI({
@@ -514,20 +686,19 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_t
                   )
                 })
               }
-            }, error = function(e) {
-              cat("   💥 Unexpected error:", e$message, "\n")
-              output[[paste0("ai_status_", i)]] <- renderUI({
-                div(
-                  style = "padding: 12px; background: #ffebee; border-left: 4px solid #f44336; margin-top: 10px;",
-                  icon("exclamation-circle", style = "color: #c62828;"),
-                  paste(" Unexpected error:", e$message)
-                )
-              })
-            }, finally = {
-              isolate({ rv$ai_extracting <- FALSE })
-              cat("   🏁 AI extraction complete\n\n")
+          }, error = function(e) {
+            cat("   💥 Unexpected error:", e$message, "\n")
+            output[[paste0("ai_status_", i)]] <- renderUI({
+              div(
+                style = "padding: 12px; background: #ffebee; border-left: 4px solid #f44336; margin-top: 10px;",
+                icon("exclamation-circle", style = "color: #c62828;"),
+                paste(" Unexpected error:", e$message)
+              )
             })
-          }, delay = 0.1)
+          }, finally = {
+            isolate({ rv$ai_extracting <- FALSE })
+            cat("   🏁 AI extraction complete\n\n")
+          })
         })
       })
     })

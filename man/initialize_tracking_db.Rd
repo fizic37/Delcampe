@@ -2,7 +2,7 @@
 % Please edit documentation in R/tracking_database.R
 \name{initialize_tracking_db}
 \alias{initialize_tracking_db}
-\title{Initialize the tracking database (fixed version)}
+\title{Initialize the tracking database (EXTENDED VERSION with AI & eBay tables)}
 \usage{
 initialize_tracking_db(db_path = "inst/app/data/tracking.sqlite")
 }
@@ -13,5 +13,5 @@ initialize_tracking_db(db_path = "inst/app/data/tracking.sqlite")
 Database connection status
 }
 \description{
-Initialize the tracking database (fixed version)
+Initialize the tracking database (EXTENDED VERSION with AI & eBay tables)
 }

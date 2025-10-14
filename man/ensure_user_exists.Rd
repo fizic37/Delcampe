@@ -2,7 +2,7 @@
 % Please edit documentation in R/tracking_database.R
 \name{ensure_user_exists}
 \alias{ensure_user_exists}
-\title{Ensure user exists - FIXED VERSION}
+\title{Ensure user exists}
 \usage{
 ensure_user_exists(user_id, username, email = NULL, role = "user")
 }
@@ -13,11 +13,11 @@ ensure_user_exists(user_id, username, email = NULL, role = "user")
 
 \item{email}{User email}
 
-\item{role}{User role (ignored)}
+\item{role}{User role}
 }
 \value{
 User ID
 }
 \description{
-Ensure user exists - FIXED VERSION
+Ensure user exists
 }

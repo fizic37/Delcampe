@@ -2,7 +2,7 @@
 % Please edit documentation in R/tracking_database.R
 \name{query_sessions}
 \alias{query_sessions}
-\title{Query sessions - FIXED VERSION}
+\title{Query sessions}
 \usage{
 query_sessions(
   user_id = NULL,
@@ -27,5 +27,5 @@ query_sessions(
 Data frame with sessions
 }
 \description{
-Query sessions - FIXED VERSION
+Query sessions
 }

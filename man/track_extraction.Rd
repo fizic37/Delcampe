@@ -2,7 +2,7 @@
 % Please edit documentation in R/tracking_database.R
 \name{track_extraction}
 \alias{track_extraction}
-\title{Track extraction completion in database}
+\title{Track extraction completion}
 \usage{
 track_extraction(
   session_id,
@@ -30,5 +30,5 @@ track_extraction(
 \item{v_boundaries}{Vertical boundaries}
 }
 \description{
-Track extraction completion in database
+Track extraction completion
 }

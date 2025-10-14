@@ -107,19 +107,7 @@ mod_postal_card_processor_ui <- function(id, card_type = "face") {
 #'
 #' @export
 mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_update = NULL, on_image_upload = NULL, on_extraction_complete = NULL) {
-  cat("\n🚀 INITIALIZING MODULE:", id, "(", card_type, ")\n")
-  cat("⏳ About to call moduleServer...\n")
-  
   result <- moduleServer(id, function(input, output, session) {
-    cat("✅ moduleServer INNER FUNCTION EXECUTING for", id, "\n")
-    
-    # ===== DIAGNOSTIC BLOCK =====
-    cat("\n", rep("#", 80), "\n")
-    cat("### MODULE INITIALIZED: ", id, " (", card_type, ")\n")
-    cat("### Timestamp: ", format(Sys.time(), "%H:%M:%OS3"), "\n")
-    cat("### Namespace: ", session$ns(""), "\n")
-    cat(rep("#", 80), "\n\n")
-    # ===== END DIAGNOSTIC BLOCK =====
     
     ns <- session$ns
     `%||%` <- function(a, b) if (is.null(a) || length(a) == 0 || all(is.na(a))) b else a
@@ -144,7 +132,11 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       current_grid_cols = NULL,
       extracted_paths_web = NULL,
       is_extracting = FALSE,  # Track extraction state to prevent unwanted observer triggers
-      reset_in_progress = FALSE  # NEW: Track reset to prevent upload observer from running
+      reset_in_progress = FALSE,  # NEW: Track reset to prevent upload observer from running
+      crop_card_mapping = NULL,  # NEW: Track mapping of crop rows to card_id for AI extraction
+      trigger_extraction = 0,  # NEW: Reactive trigger for extraction (incremented to trigger)
+      current_image_hash = NULL,  # FIX: Hash of current uploaded image for duplicate detection
+      current_card_id = NULL  # FIX: Card ID from database tracking
     )
     
     # ---- Python setup ----
@@ -153,43 +145,20 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
                       isTRUE(get(".postal_card_python_loaded", envir = .GlobalEnv)) &&
                       exists("detect_grid_layout", envir = .GlobalEnv) &&
                       exists("crop_image_with_boundaries", envir = .GlobalEnv)
-
-    if (python_sourced) {
-      cat("✅ [", card_type, "] Using globally loaded Python module\n")
-    } else {
-      cat("⚠️ [", card_type, "] Python not available - will use fallback methods\n")
-      cat("   .postal_card_python_loaded:", exists(".postal_card_python_loaded", envir = .GlobalEnv), "\n")
-      if (exists(".postal_card_python_loaded", envir = .GlobalEnv)) {
-        cat("   Value:", get(".postal_card_python_loaded", envir = .GlobalEnv), "\n")
-      }
-      cat("   detect_grid_layout in .GlobalEnv:", exists("detect_grid_layout", envir = .GlobalEnv), "\n")
-      cat("   crop_image_with_boundaries in .GlobalEnv:", exists("crop_image_with_boundaries", envir = .GlobalEnv), "\n")
-      python_sourced <- FALSE
-    }
     
     # ---- Image upload handling ----
     observeEvent(input$image_upload, {
-      cat("\n🔥🔥🔥 UPLOAD OBSERVER TRIGGERED [", toupper(card_type), "] 🔥🔥🔥\n")
-      
       # CRITICAL: Skip if reset is in progress
       if (isTRUE(rv$reset_in_progress)) {
-        cat("\n⚠️ SKIPPING upload observer [", toupper(card_type), "] - reset in progress\n")
         return()
       }
-      
+
       # CRITICAL: Skip if extraction is in progress to prevent cascade
       if (isTRUE(rv$is_extracting)) {
-        cat("\n⚠️⚠️⚠️ SKIPPING upload observer [", toupper(card_type), "] - extraction in progress ⚠️⚠️⚠️\n")
         return()
       }
 
       file_info <- input$image_upload
-
-      cat("\n🎯 IMAGE UPLOAD [", toupper(card_type), "] MODULE:\n")
-      cat("   Module ID:", id, "\n")
-      cat("   Namespace prefix:", session$ns(""), "\n")
-      cat("   Timestamp:", Sys.time(), "\n")
-      cat("   is_extracting flag:", rv$is_extracting, "\n")
 
       # Reset state
       rv$image_path_original <- NULL
@@ -201,6 +170,8 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       rv$current_grid_rows <- NULL
       rv$current_grid_cols <- NULL
       rv$boundaries_manually_adjusted <- FALSE
+      rv$current_image_hash <- NULL  # FIX: Clear hash for new upload
+      rv$current_card_id <- NULL  # FIX: Clear card ID for new upload
       
       # Save uploaded file
       timestamp <- format(Sys.time(), "%Y-%m-%d_%H-%M-%S")
@@ -208,6 +179,40 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       upload_path <- file.path(session_temp_dir, safe_filename)
       file.copy(file_info$datapath, upload_path)
       rv$image_path_original <- upload_path
+      
+      # Check for duplicate image before processing AND track upload
+      message("=== UPLOAD TRACKING START (card_type: ", card_type, ") ===")
+      image_hash <- calculate_image_hash(upload_path)
+      message("  📌 Hash calculated: ", substr(image_hash, 1, 12), "...")
+      rv$current_image_hash <- image_hash
+
+      # NEW 3-LAYER ARCHITECTURE: Get or create postal card
+      tryCatch({
+        message("  🔍 Calling get_or_create_card with image_type = ", card_type)
+        card_id <- get_or_create_card(
+          file_hash = image_hash,
+          image_type = card_type,
+          original_filename = file_info$name,
+          file_size = file.info(upload_path)$size,
+          dimensions = NULL
+        )
+
+        rv$current_card_id <- card_id
+        message("  ✅ Card ID stored in rv: ", card_id)
+
+        # Track in session activity
+        track_session_activity(
+          session_id = session$token,
+          card_id = card_id,
+          action = "uploaded",
+          details = list(upload_path = upload_path, filename = file_info$name)
+        )
+
+        message("  ✅ Card tracked: card_id = ", card_id)
+      }, error = function(e) {
+        message("  ❌ Failed to track upload: ", e$message)
+      })
+      message("=== UPLOAD TRACKING END ===")
       
       # Create web URL
       norm_session_dir <- normalizePath(session_temp_dir, winslash = "/")
@@ -217,64 +222,37 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       # CRITICAL FIX: Use paste with forward slash for web URLs, not file.path
       rv$image_url_display <- paste(resource_prefix, rel_path, sep = "/")
       
-      cat("   📁 Session temp dir:", session_temp_dir, "\n")
-      cat("   📄 Upload path:", upload_path, "\n")
-      cat("   🔗 Resource prefix:", resource_prefix, "\n")
-      cat("   📍 Relative path:", rel_path, "\n")
-      cat("   🌐 Final URL:", rv$image_url_display, "\n")
-      
       # Get image dimensions and detect grid
-      cat("   🐍 Python sourced:", python_sourced, "\n")
-      cat("   🔍 detect_grid_layout exists:", exists("detect_grid_layout"), "\n")
-      
       if (python_sourced && exists("detect_grid_layout")) {
-        cat("   📞 CALLING detect_grid_layout() from upload observer\n")
-        cat("   📂 Image path:", rv$image_path_original, "\n")
-        
         # FILE VERIFICATION: Ensure file is ready before calling Python
         if (!file.exists(rv$image_path_original) || file.size(rv$image_path_original) == 0) {
-          cat("   ⚠️ File not ready, waiting 50ms...\n")
           Sys.sleep(0.05)
         }
-        
-        cat("   📊 File exists:", file.exists(rv$image_path_original), "\n")
-        cat("   📏 File size:", file.size(rv$image_path_original), "bytes\n")
-        
+
         # RETRY LOGIC: Handle transient file system issues
         max_attempts <- 3
         attempt <- 1
         py_results <- NULL
-        
+
         while (is.null(py_results) && attempt <= max_attempts) {
           if (attempt > 1) {
-            cat("   🔄 Retry attempt", attempt, "after 100ms delay...\n")
             Sys.sleep(0.1)
           }
-          
+
           py_results <- tryCatch({
-            result <- detect_grid_layout(rv$image_path_original)
-            cat("   ✅ Python call successful on attempt", attempt, "\n")
-            cat("   📐 Result structure:", names(result), "\n")
-            result
+            detect_grid_layout(rv$image_path_original)
           }, error = function(e) {
-            cat("   ❌ Attempt", attempt, "failed:", e$message, "\n")
-            if (attempt < max_attempts) {
-              cat("   Will retry...\n")
-            } else {
-              cat("   All attempts failed. Stack trace:", paste(capture.output(traceback()), collapse="\n"), "\n")
+            if (attempt == max_attempts) {
+              showNotification("Grid detection failed", type = "error", duration = 3)
             }
             NULL
           })
-          
+
           attempt <- attempt + 1
         }
-        
-        cat("   🔬 py_results is NULL:", is.null(py_results), "\n")
-        
+
         if (!is.null(py_results)) {
-          cat("   ✅ Processing Python results...\n")
           rv$image_dims_original <- c(py_results$image_width, py_results$image_height)
-          cat("   📏 Image dimensions set:", rv$image_dims_original, "\n")
           
           # Get detected boundaries (internal lines only)
           py_h_temp <- if (!is.null(py_results$h_boundaries)) as.numeric(unlist(py_results$h_boundaries)) else numeric(0)
@@ -306,27 +284,17 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           # Update grid dimensions
           rv$current_grid_rows <- max(0, length(rv$h_boundaries) - 1)
           rv$current_grid_cols <- max(0, length(rv$v_boundaries) - 1)
-          
-          cat("   Grid:", rv$current_grid_rows, "x", rv$current_grid_cols, "\n")
-          cat("   H boundaries:", paste(rv$h_boundaries, collapse = ", "), "\n")
-          cat("   V boundaries:", paste(rv$v_boundaries, collapse = ", "), "\n")
-          
+
           # Update numeric inputs
           updateNumericInput(session, "num_rows_input", value = rv$current_grid_rows)
           updateNumericInput(session, "num_cols_input", value = rv$current_grid_cols)
-          
+
           rv$force_grid_redraw <- rv$force_grid_redraw + 1
-        } else {
-          cat("   ⚠️ Python detection returned NULL - using fallback\n")
         }
-      } else {
-        cat("   ⚠️ Python not available - using fallback\n")
       }
       
       # FALLBACK: If Python detection failed or unavailable, use image library to get dims
       if (is.null(rv$image_dims_original)) {
-        cat("   🔧 Using fallback method to get image dimensions...\n")
-        
         # Try to read image with magick or other methods
         dims_result <- tryCatch({
           # Method 1: Try magick if available
@@ -350,29 +318,23 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
             NULL
           }
         }, error = function(e) {
-          cat("   ❌ Fallback image read error:", e$message, "\n")
           NULL
         })
-        
+
         if (!is.null(dims_result)) {
           rv$image_dims_original <- dims_result
-          cat("   ✅ Got dimensions from fallback:", rv$image_dims_original, "\n")
-          
+
           # Set default 1x1 grid
           rv$h_boundaries <- c(0, rv$image_dims_original[2])
           rv$v_boundaries <- c(0, rv$image_dims_original[1])
           rv$current_grid_rows <- 1
           rv$current_grid_cols <- 1
-          
+
           updateNumericInput(session, "num_rows_input", value = 1)
           updateNumericInput(session, "num_cols_input", value = 1)
-          
+
           rv$force_grid_redraw <- rv$force_grid_redraw + 1
-          
-          cat("   🎯 Default 1x1 grid set\n")
         } else {
-          cat("   ❌ Could not determine image dimensions!\n")
-          cat("   Please install 'magick' package: install.packages('magick')\n")
           showNotification(
             "Could not read image dimensions. Please install the 'magick' package.",
             type = "error",
@@ -386,6 +348,66 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       shinyjs::show("cols_control")
       shinyjs::show("extract_control")
       
+      # Check for duplicate image AFTER upload and grid detection
+      message("\n=== DUPLICATE CHECK START (card_type: ", card_type, ") ===")
+      if (!is.null(rv$current_image_hash)) {
+        message("  🔍 Searching for existing processing...")
+        message("     Hash: ", substr(rv$current_image_hash, 1, 12), "...")
+        message("     Type: ", card_type)
+
+        existing <- find_card_processing(rv$current_image_hash, card_type)
+
+        if (!is.null(existing)) {
+          message("  📋 FOUND existing processing!")
+          message("     Card ID: ", existing$card_id)
+          message("     Last processed: ", existing$last_processed)
+          message("     Crop paths count: ", length(existing$crop_paths))
+
+          validation <- validate_existing_crops(existing$crop_paths)
+          message("  🔎 Validating crop files...")
+          message("     All exist: ", validation$all_exist)
+          if (!validation$all_exist) {
+            message("     Missing files: ", paste(validation$missing_files, collapse = ", "))
+          }
+
+          if (validation$all_exist) {
+            message("  ✅ Duplicate image detected - showing modal")
+
+            # Store data for potential reuse
+            rv$pending_existing_data <- existing
+            
+            # Show modal asking user if they want to reuse previous processing
+            showModal(modalDialog(
+              title = "Duplicate Image Detected",
+              HTML(paste0(
+                "<p>This image was previously processed on <strong>",
+                format_timestamp(existing$last_processed),
+                "</strong></p>",
+                "<p>Would you like to reuse the previous crops?</p>",
+                "<ul>",
+                "<li><strong>Use Existing:</strong> Instantly restore ", length(existing$crop_paths), " crops</li>",
+                "<li><strong>Process Anyway:</strong> Continue with current detection</li>",
+                "</ul>"
+              )),
+              footer = tagList(
+                actionButton(ns("use_existing_crops"), "Use Existing", class = "btn-primary"),
+                actionButton(ns("process_anyway"), "Process Anyway", class = "btn-secondary"),
+                modalButton("Cancel")
+              ),
+              size = "m",
+              easyClose = FALSE
+            ))
+          } else {
+            message("  ⚠️ Crops validation failed - not showing modal")
+          }
+        } else {
+          message("  ℹ️ No existing processing found")
+        }
+      } else {
+        message("  ⚠️ No image hash available - skipping duplicate check")
+      }
+      message("=== DUPLICATE CHECK END ===\n")
+
       if (!is.null(on_image_upload)) on_image_upload()
     })
     
@@ -427,67 +449,145 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       
     }, ignoreNULL = TRUE, ignoreInit = TRUE)
     
+    # ---- Handle "Use Existing" button from duplicate modal ----
+    observeEvent(input$use_existing_crops, {
+      req(rv$pending_existing_data)
+      
+      removeModal()
+      
+      tryCatch({
+        existing <- rv$pending_existing_data
+
+        # Copy crops to session temp dir for web display
+        timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+        session_crops_dir <- file.path(session_temp_dir, "crops_display")
+        dir.create(session_crops_dir, showWarnings = FALSE, recursive = TRUE)
+
+        # Copy crops from persistent storage to session dir
+        copy_result <- copy_existing_crops(existing$crop_paths, session_crops_dir)
+        
+        if (copy_result$success) {
+          # Restore boundaries and grid configuration
+          rv$h_boundaries <- existing$h_boundaries
+          rv$v_boundaries <- existing$v_boundaries
+          rv$current_grid_rows <- existing$grid_rows
+          rv$current_grid_cols <- existing$grid_cols
+          
+          # Create web URLs for the copied crops
+          abs_paths <- normalizePath(copy_result$new_paths, winslash = "/")
+          abs_sess_dir <- normalizePath(session_temp_dir, winslash = "/")
+          rel_paths <- sub(paste0("^", gsub("/", "\\/", abs_sess_dir), "/*"), "", abs_paths)
+          rel_paths <- sub("^/*", "", rel_paths)
+          rv$extracted_paths_web <- paste(resource_prefix, rel_paths, sep = "/")
+          
+          # Track reuse in session activity
+          track_session_activity(
+            session_id = session$token,
+            card_id = rv$current_card_id,
+            action = "reused",
+            details = list(
+              source_card_id = existing$card_id,
+              crops_count = length(rv$extracted_paths_web)
+            )
+          )
+          
+          # Force UI update
+          rv$force_grid_redraw <- rv$force_grid_redraw + 1
+          
+          showNotification(
+            paste0("Successfully restored ", length(rv$extracted_paths_web), " crops from previous processing"),
+            type = "message",
+            duration = 5
+          )
+
+          message("Crops reused successfully from card_id: ", existing$card_id)
+
+          # NEW: Store crop-to-card mapping for AI extraction (Use Existing case)
+          rv$crop_card_mapping <- data.frame(
+            row = 0:(length(abs_paths) - 1),
+            card_id = rv$current_card_id,
+            crop_path = abs_paths,
+            stringsAsFactors = FALSE
+          )
+          message("Crop mapping created from existing: ", nrow(rv$crop_card_mapping), " crops for card_id: ", rv$current_card_id)
+
+          # NEW: Trigger extraction complete callback
+          # This allows the app to detect both modules are done and auto-combine
+          if (!is.null(on_extraction_complete)) {
+            on_extraction_complete(
+              count = length(rv$extracted_paths_web),
+              dir = session_crops_dir,
+              used_existing = TRUE
+            )
+          }
+        } else {
+          showNotification("Failed to copy existing crops", type = "error", duration = 5)
+        }
+        
+      }, error = function(e) {
+        showNotification(paste("Error reusing crops:", e$message), type = "error", duration = 5)
+        message("Error in use_existing_crops: ", e$message)
+      })
+      
+      rv$pending_existing_data <- NULL
+    })
+    
+    # ---- Handle "Process Anyway" button from duplicate modal ----
+    observeEvent(input$process_anyway, {
+      removeModal()
+      rv$pending_existing_data <- NULL
+
+      showNotification("Processing with current grid boundaries", type = "message", duration = 2)
+
+      # Trigger extraction using native Shiny reactive system (no shinyjs needed)
+      rv$trigger_extraction <- rv$trigger_extraction + 1
+    })
+    
     # ---- Draggable line handlers (FIXED) ----
     observeEvent(input$hline_moved_direct, {
       req(input$hline_moved_direct)
       d <- input$hline_moved_direct
-      
-      cat("🔴 H-line moved [", toupper(card_type), "] MODULE:\n")
-      cat("   ID:", d$id, "| Pos:", d$pos_px_wrapper, "| Wrapper H:", d$wrapper_dim, "\n")
-      
+
       if (!is.null(d$pos_px_wrapper) && !is.null(d$wrapper_dim) && !is.null(d$id)) {
         # Convert to original image coordinates
         scale_factor <- as.numeric(rv$image_dims_original[2]) / as.numeric(d$wrapper_dim)
         orig_y <- round(as.numeric(d$pos_px_wrapper) * scale_factor)
         line_index <- as.numeric(d$id)
-        
+
         if (line_index > 0 && line_index <= length(rv$h_boundaries)) {
           rv$h_boundaries[line_index] <- orig_y
           rv$boundaries_manually_adjusted <- TRUE
           rv$force_grid_redraw <- rv$force_grid_redraw + 1
-          cat("   ✅ Updated to", orig_y, "px\n")
         }
       }
     })
-    
+
     observeEvent(input$vline_moved_direct, {
       req(input$vline_moved_direct)
       d <- input$vline_moved_direct
-      
-      cat("🔵 V-line moved [", toupper(card_type), "] MODULE:\n")
-      cat("   ID:", d$id, "| Pos:", d$pos_px_wrapper, "| Wrapper W:", d$wrapper_dim, "\n")
-      
+
       if (!is.null(d$pos_px_wrapper) && !is.null(d$wrapper_dim) && !is.null(d$id)) {
         # Convert to original image coordinates
         scale_factor <- as.numeric(rv$image_dims_original[1]) / as.numeric(d$wrapper_dim)
         orig_x <- round(as.numeric(d$pos_px_wrapper) * scale_factor)
         line_index <- as.numeric(d$id)
-        
+
         if (line_index > 0 && line_index <= length(rv$v_boundaries)) {
           rv$v_boundaries[line_index] <- orig_x
           rv$boundaries_manually_adjusted <- TRUE
           rv$force_grid_redraw <- rv$force_grid_redraw + 1
-          cat("   ✅ Updated to", orig_x, "px\n")
         }
       }
     })
     
     # ---- UI Rendering ----
     output$images_panel <- renderUI({
-      cat("\n🎨 RENDERING images_panel for", toupper(card_type), "\n")
-      cat("   image_url_display:", rv$image_url_display, "\n")
-      cat("   is.null(rv$image_url_display):", is.null(rv$image_url_display), "\n")
-      
       if (is.null(rv$image_url_display)) {
-        cat("   ⚠️ Showing placeholder message\n")
         return(div(
           style = "width:100%; height:500px; display:flex; align-items:center; justify-content:center; color:#aaa; font-style:italic;",
           paste("Upload a", card_type, "image to start.")
         ))
       }
-      
-      cat("   ✅ Creating grid wrapper\n")
-      cat("   Grid wrapper ID:", ns("grid_ui_wrapper"), "\n")
       
       tags$div(
         id = ns("grid_ui_wrapper"),
@@ -498,19 +598,9 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
     })
     
     output$image_with_draggable_grid <- renderUI({
-      cat("\n🖼️ RENDERING image_with_draggable_grid for", toupper(card_type), "\n")
-      cat("   Checking requirements...\n")
-      cat("   rv$image_url_display:", rv$image_url_display, "\n")
-      cat("   rv$image_dims_original:", rv$image_dims_original, "\n")
-      cat("   length(rv$h_boundaries):", length(rv$h_boundaries), "\n")
-      cat("   length(rv$v_boundaries):", length(rv$v_boundaries), "\n")
-      
       req(rv$image_url_display, rv$image_dims_original, length(rv$h_boundaries) >= 2, length(rv$v_boundaries) >= 2)
-      
-      cat("   ✅ All requirements met!\n")
-      
+
       force_redraw_trigger <- rv$force_grid_redraw  # Trigger reactivity
-      cat("   force_redraw_trigger:", force_redraw_trigger, "\n")
       
       h_boundaries_px <- rv$h_boundaries
       v_boundaries_px <- rv$v_boundaries
@@ -548,12 +638,6 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       # Cache-busting image source
       img_src_with_nonce <- paste0("/", rv$image_url_display, "?v=", gsub("[^0-9]", "", as.character(as.numeric(Sys.time()) * 1000)))
       
-      cat("   📸 Image source:", img_src_with_nonce, "\n")
-      cat("   📏 Image dimensions:", rv$image_dims_original[1], "x", rv$image_dims_original[2], "\n")
-      cat("   🔴 H boundaries:", paste(h_boundaries_px, collapse=", "), "\n")
-      cat("   🔵 V boundaries:", paste(v_boundaries_px, collapse=", "), "\n")
-      cat("   Creating", length(h_boundaries_px), "horizontal and", length(v_boundaries_px), "vertical lines\n")
-      
       tags$div(
         style = "position:relative; width:100%; height:100%; overflow:visible;",
         tags$img(
@@ -588,44 +672,26 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
     })
     
     # ---- Extraction logic ----
-    observeEvent(input$extract_postcards, {
+    observeEvent({
+      input$extract_postcards
+      rv$trigger_extraction
+    }, {
       req(rv$image_path_original, length(rv$h_boundaries) > 1, length(rv$v_boundaries) > 1, python_sourced)
 
       # Set extraction flag to prevent any reactive cascade from triggering detection
       rv$is_extracting <- TRUE
       on.exit(rv$is_extracting <- FALSE)  # Always reset flag when done
 
-      py_out_dir <- file.path(session_temp_dir, python_output_subdir_name, paste0("extract_", as.integer(Sys.time())))
-      dir.create(py_out_dir, showWarnings = FALSE, recursive = TRUE)
-      rv$extracted_paths_web <- NULL
+      # CRITICAL FIX: Use persistent directory for crops, not temp session dir
+      # This allows deduplication to work across app restarts
+      persistent_crops_dir <- file.path("inst/app/data/crops", card_type, rv$current_card_id)
+      dir.create(persistent_crops_dir, showWarnings = FALSE, recursive = TRUE)
 
-      cat("\n🚀 EXTRACTION STARTED [", toupper(card_type), "] MODULE:\n")
-      cat("   Module ID:", id, "\n")
-      cat("   Timestamp:", Sys.time(), "\n")
-      cat("   Image path:", rv$image_path_original, "\n")
-      cat("   H boundaries:", paste(rv$h_boundaries, collapse = ", "), "\n")
-      cat("   V boundaries:", paste(rv$v_boundaries, collapse = ", "), "\n")
-      cat("   ⚠️ CALLING crop_image_with_boundaries ONLY (NOT detect_grid_layout)\n")
-      
-      # CRITICAL DEBUG: Verify the function exists and show what we're calling
-      cat("   🔍 Checking function availability:\n")
-      cat("      crop_image_with_boundaries exists:", exists("crop_image_with_boundaries", envir = .GlobalEnv), "\n")
-      if (exists("crop_image_with_boundaries", envir = .GlobalEnv)) {
-        func <- get("crop_image_with_boundaries", envir = .GlobalEnv)
-        cat("      Function type:", typeof(func), "\n")
-        cat("      Is function:", is.function(func), "\n")
-      }
-      
-      # Convert boundaries to the exact format Python expects
-      h_bounds_list <- as.list(as.integer(round(rv$h_boundaries)))
-      v_bounds_list <- as.list(as.integer(round(rv$v_boundaries)))
-      
-      cat("   📦 Prepared arguments for Python:\n")
-      cat("      image_path:", rv$image_path_original, "\n")
-      cat("      h_boundaries (list):", paste(unlist(h_bounds_list), collapse=", "), "\n")
-      cat("      v_boundaries (list):", paste(unlist(v_bounds_list), collapse=", "), "\n")
-      cat("      output_dir:", py_out_dir, "\n")
-      cat("\n   🐍 CALLING Python function NOW...\n\n")
+      py_out_dir <- file.path(persistent_crops_dir, paste0("extract_", as.integer(Sys.time())))
+      dir.create(py_out_dir, showWarnings = FALSE, recursive = TRUE)
+
+      message("  📂 Persistent crop directory: ", py_out_dir)
+      rv$extracted_paths_web <- NULL
 
       py_results <- tryCatch({
         crop_image_with_boundaries(
@@ -635,32 +701,82 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           output_dir = py_out_dir
         )
       }, error = function(e) {
-        cat("❌ Python error:", e$message, "\n")
         showNotification(paste("Extraction error:", e$message), type = "error", duration = 5)
         NULL
       })
-      
+
       if (!is.null(py_results) && !is.null(py_results$extracted_paths) && length(unlist(py_results$extracted_paths)) > 0) {
         abs_paths <- normalizePath(unlist(py_results$extracted_paths), winslash = "/")
+
+        # Copy crops to session temp dir for web serving
+        session_crops_dir <- file.path(session_temp_dir, "crops_display")
+        dir.create(session_crops_dir, showWarnings = FALSE, recursive = TRUE)
+
+        web_paths <- character(length(abs_paths))
+        for (i in seq_along(abs_paths)) {
+          filename <- basename(abs_paths[i])
+          dest_file <- file.path(session_crops_dir, filename)
+          file.copy(abs_paths[i], dest_file, overwrite = TRUE)
+          web_paths[i] <- dest_file
+        }
+
+        # Create web URLs from copied files
         abs_sess_dir <- normalizePath(session_temp_dir, winslash = "/")
-        rel_paths <- sub(paste0("^", gsub("/", "\\\\/", abs_sess_dir), "/*"), "", abs_paths)
+        norm_web_paths <- normalizePath(web_paths, winslash = "/")
+        rel_paths <- sub(paste0("^", gsub("/", "\\\\/", abs_sess_dir), "/*"), "", norm_web_paths)
         rel_paths <- sub("^/*", "", rel_paths)
-        # CRITICAL FIX: Use paste with forward slash for web URLs, not file.path
         rv$extracted_paths_web <- paste(resource_prefix, rel_paths, sep = "/")
 
-        cat("✅ EXTRACTION COMPLETED [", toupper(card_type), "] MODULE:\n")
-        cat("   Extracted", length(rv$extracted_paths_web), "images\n")
-        cat("   Module ID:", id, "\n")
-        cat("   Timestamp:", Sys.time(), "\n\n")
-        
+        # Save processing with 3-layer architecture
+        message("\n=== SAVING EXTRACTION (card_type: ", card_type, ") ===")
+        tryCatch({
+          message("  💾 Saving processing to database...")
+          message("     Card ID: ", rv$current_card_id)
+          message("     Crops: ", length(abs_paths))
+          message("     Grid: ", rv$current_grid_rows, "x", rv$current_grid_cols)
+
+          save_card_processing(
+            card_id = rv$current_card_id,
+            crop_paths = abs_paths,
+            h_boundaries = rv$h_boundaries,
+            v_boundaries = rv$v_boundaries,
+            grid_rows = rv$current_grid_rows,
+            grid_cols = rv$current_grid_cols,
+            extraction_dir = py_out_dir,
+            ai_data = NULL
+          )
+
+          track_session_activity(
+            session_id = session$token,
+            card_id = rv$current_card_id,
+            action = "processed",
+            details = list(crops_count = length(abs_paths))
+          )
+
+          message("  ✅ Processing saved for card_id: ", rv$current_card_id)
+        }, error = function(e) {
+          message("  ❌ Failed to save processing: ", e$message)
+        })
+        message("=== SAVING EXTRACTION END ===\n")
+
+        # Store crop-to-card mapping for AI extraction
+        rv$crop_card_mapping <- data.frame(
+          row = 0:(length(abs_paths) - 1),
+          card_id = rv$current_card_id,
+          crop_path = abs_paths,
+          stringsAsFactors = FALSE
+        )
+
+        # Trigger callback
         if (!is.null(on_extraction_complete)) {
-          on_extraction_complete(length(rv$extracted_paths_web), py_out_dir)
+          on_extraction_complete(
+            count = length(rv$extracted_paths_web),
+            dir = py_out_dir,
+            used_existing = FALSE
+          )
         }
-        
-        # No success notification - extracted cards are visible in UI
       } else {
-        cat("❌ Extraction failed\n")
-        showNotification("Extraction failed. Check console.", type = "error", duration = 5)
+        showNotification("Extraction failed", type = "error", duration = 5)
       }
     })
     
@@ -744,19 +860,20 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
         }
       }),
       get_extracted_count = reactive(length(rv$extracted_paths_web %||% c())),
-      
+
+      # NEW: Get crop-to-card mapping for AI extraction
+      get_crop_card_mapping = reactive(rv$crop_card_mapping),
+
       # NEW: Reset function for "Start Over" functionality
       reset_module = function() {
-        cat("\n🔄 RESETTING MODULE [", toupper(card_type), "]\n")
-        
         # Set flag to prevent upload observer from triggering
         rv$reset_in_progress <- TRUE
-        
+
         # Hide UI controls
         shinyjs::hide("rows_control")
         shinyjs::hide("cols_control")
         shinyjs::hide("extract_control")
-        
+
         # Clear all reactive values
         rv$image_path_original <- NULL
         rv$image_url_display <- NULL
@@ -769,20 +886,17 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
         rv$current_grid_cols <- NULL
         rv$extracted_paths_web <- NULL
         rv$is_extracting <- FALSE
-        
+
         # Reset file input (will trigger observer, but flag prevents execution)
         shinyjs::reset("image_upload")
-        
+
         # Use simple Sys.sleep to let the reset complete, then clear flag
         Sys.sleep(0.1)
         rv$reset_in_progress <- FALSE
-        
-        cat("   ✅ Module reset complete\n")
       }
     ))
   })
-  
-  cat("✅ moduleServer completed for", id, "- returning result\n\n")
+
   return(result)
 }
 

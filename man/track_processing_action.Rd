@@ -2,7 +2,7 @@
 % Please edit documentation in R/tracking_database.R
 \name{track_processing_action}
 \alias{track_processing_action}
-\title{Track processing action - FIXED VERSION}
+\title{Track processing action}
 \usage{
 track_processing_action(
   image_id,
@@ -30,5 +30,5 @@ track_processing_action(
 Success status
 }
 \description{
-Track processing action - FIXED VERSION
+Track processing action
 }

@@ -2,7 +2,7 @@
 % Please edit documentation in R/tracking_database.R
 \name{start_processing_session}
 \alias{start_processing_session}
-\title{Start processing session - FIXED VERSION}
+\title{Start processing session}
 \usage{
 start_processing_session(session_id, user_id, session_type = "general")
 }
@@ -11,11 +11,11 @@ start_processing_session(session_id, user_id, session_type = "general")
 
 \item{user_id}{User identifier}
 
-\item{session_type}{Type of session (ignored)}
+\item{session_type}{Type of session}
 }
 \value{
 Session ID
 }
 \description{
-Start processing session - FIXED VERSION
+Start processing session
 }

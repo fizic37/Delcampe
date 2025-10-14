@@ -5,6 +5,38 @@
 #' @import shiny
 #' @noRd
 app_server <- function(input, output, session) {
+  # ==== INITIALIZE TRACKING DATABASE ====
+  cat("
+📊 Initializing tracking database...
+")
+  db_initialized <- tryCatch({
+    initialize_tracking_db("inst/app/data/tracking.sqlite")
+  }, error = function(e) {
+    cat("⚠️ Failed to initialize database:", e$message, "
+")
+    FALSE
+  })
+  
+  if (db_initialized) {
+    cat("✅ Tracking database ready
+")
+    # Start session tracking
+    tryCatch({
+      start_processing_session(
+        session_id = session$token,
+        user_id = "default_user",
+        session_type = "postal_cards"
+      )
+      cat("✅ Session tracking started:", session$token, "
+
+")
+    }, error = function(e) {
+      cat("⚠️ Failed to start session tracking:", e$message, "
+
+")
+    })
+  }
+  
   # Load Python module using import_from_path (proper reticulate pattern)
   if (!exists(".postal_card_py_module", envir = .GlobalEnv)) {
     cat("\n✨ Importing Python module...\n")

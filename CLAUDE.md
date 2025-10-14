@@ -1,5 +1,14 @@
 # Delcampe Postal Card Processor - Claude Assistant
 
+## Instructions for AI Assistants
+
+**CRITICAL:**
+- **Always use Serena** for semantic code retrieval and editing tools
+  - Use `serena:find_symbol` to locate code entities
+  - Use `serena:read_file` for reading files
+  - Use `serena:replace_symbol_body` and other editing tools for code changes
+  - Use `serena:read_memory` to access project context from `.serena/memories/`
+
 ## Core Principles
 
 ### Design Philosophy
@@ -112,7 +121,6 @@
 - Implement clear interfaces between modules
 
 ### Security Principles
-- Store API keys in environment variables only
 - Use SHA-256 hashing for password storage
 - Implement proper session management and cleanup
 - Protect sensitive operations with appropriate authorization checks
@@ -128,6 +136,31 @@
 - **Python Integration**: Via reticulate (existing setup preserved)
 - **Database**: SQLite for lightweight, embedded data storage
 - **Version Control**: Git with proper branching and commit practices
+
+---
+
+## Documentation Structure
+
+This project maintains multiple documentation layers for different audiences and purposes:
+
+### For AI Assistants (You!)
+- **`CLAUDE.md`** (this file) - Core principles, constraints, and development standards
+- **`.serena/memories/`** - Technical context, solutions, and implementation details
+- **`.serena/memories/INDEX.md`** - Navigation guide for AI-accessible documentation
+- **`PRPs/`** - Product Requirement Prompts for feature implementation
+
+### For Human Developers
+- **`docs/`** - Human-readable architecture and guides
+- **`docs/README.md`** - Documentation overview and navigation
+- **`docs/architecture/`** - System architecture and design
+- **`docs/guides/`** - Step-by-step development guides
+- **`docs/decisions/`** - Architecture Decision Records (ADRs)
+
+### When to Reference What
+- **Starting new work?** Read `.serena/memories/INDEX.md` first, then check `docs/architecture/overview.md` for high-level context
+- **Making architecture decisions?** Check `docs/decisions/` for precedents, document new decisions there
+- **Implementing features?** Use `PRPs/` for specifications, `.serena/memories/` for technical context
+- **Onboarding humans?** Point them to `docs/guides/getting-started.md`
 
 ---
 
