@@ -457,7 +457,7 @@ find_card_processing <- function(file_hash, image_type) {
     on.exit(DBI::dbDisconnect(con))
     
     result <- DBI::dbGetQuery(con, "
-      SELECT 
+      SELECT
         c.card_id,
         c.file_hash,
         c.image_type,
@@ -473,6 +473,7 @@ find_card_processing <- function(file_hash, image_type) {
         p.ai_description,
         p.ai_condition,
         p.ai_price,
+        p.ai_model,
         p.last_processed
       FROM postal_cards c
       LEFT JOIN card_processing p ON c.card_id = p.card_id
@@ -504,7 +505,8 @@ find_card_processing <- function(file_hash, image_type) {
       ai_title = result$ai_title,
       ai_description = result$ai_description,
       ai_condition = result$ai_condition,
-      ai_price = result$ai_price
+      ai_price = result$ai_price,
+      ai_model = result$ai_model
     ))
     
   }, error = function(e) {

@@ -493,12 +493,6 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           
           # Force UI update
           rv$force_grid_redraw <- rv$force_grid_redraw + 1
-          
-          showNotification(
-            paste0("Successfully restored ", length(rv$extracted_paths_web), " crops from previous processing"),
-            type = "message",
-            duration = 5
-          )
 
           message("Crops reused successfully from card_id: ", existing$card_id)
 

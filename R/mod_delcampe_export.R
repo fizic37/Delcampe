@@ -511,27 +511,27 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
     # Render AI buttons dynamically based on extraction history
     observe({
       req(image_paths())
+      req(existing_ai_data())  # Wait for AI data to be loaded
       paths <- image_paths()
+      ai_data_list <- existing_ai_data()
 
       lapply(seq_along(paths), function(i) {
         output[[paste0("ai_button_", i)]] <- renderUI({
-          # Get image ID from path to check extraction history
-          image_id <- get_image_by_path(paths[i])
-
           button_label <- "Extract with AI"
           button_icon <- icon("wand-magic-sparkles")
           button_class <- "btn-primary"
 
-          if (!is.null(image_id)) {
-            # Check if there's a previous extraction
-            history <- get_ai_extraction_history(image_id)
+          # Check if this image has existing AI data (duplicate)
+          has_existing_data <- !is.null(ai_data_list) &&
+                              i <= length(ai_data_list) &&
+                              !is.null(ai_data_list[[i]]) &&
+                              isTRUE(ai_data_list[[i]]$has_data)
 
-            if (nrow(history) > 0) {
-              # There's a previous extraction
-              button_label <- "Re-extract with AI"
-              button_icon <- icon("rotate")
-              button_class <- "btn-warning"
-            }
+          if (has_existing_data) {
+            # This is a duplicate with existing AI data
+            button_label <- "Re-extract with AI"
+            button_icon <- icon("rotate")
+            button_class <- "btn-warning"
           }
 
           actionButton(
@@ -551,9 +551,17 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
       paths <- image_paths()
       
       lapply(seq_along(paths), function(i) {
-        observeEvent(input[[paste0("extract_ai_", i)]], {
+        observeEvent(input[[paste0("extract_ai_", i)]], ignoreNULL = TRUE, ignoreInit = TRUE, {
 
           cat("\n🎯 Extract AI button clicked for image", i, "\n")
+
+          # Show notification
+          notification_id <- showNotification(
+            "Starting AI extraction...",
+            duration = NULL,  # Don't auto-close
+            closeButton = FALSE,
+            type = "message"
+          )
 
           # Get current path and model
           current_path <- paths[i]
@@ -638,7 +646,16 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
               )
               
               cat("   Prompt built, calling API...\n")
-              
+
+              # Update notification
+              showNotification(
+                sprintf("Analyzing with %s...", if(selected_model == "claude") "Claude" else "GPT-4"),
+                id = notification_id,
+                duration = NULL,
+                closeButton = FALSE,
+                type = "message"
+              )
+
               # Call appropriate API (using actual file path)
               result <- if (selected_model == "claude") {
                 call_claude_api(
@@ -681,20 +698,25 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
                 # Auto-fill form fields (both title and description are now textAreaInput)
                 cat("   📝 Updating form fields...\n")
 
-                # Update title (now a textAreaInput)
-                shiny::updateTextAreaInput(session, paste0("item_title_", i), value = parsed$title)
-                cat("      Title updated (length:", nchar(parsed$title), ")\n")
+                # Use later::later() to ensure UI updates work properly
+                later::later(function() {
+                  # Update title (now a textAreaInput)
+                  shiny::updateTextAreaInput(session, paste0("item_title_", i), value = parsed$title)
+                  cat("      Title updated (length:", nchar(parsed$title), ")\n")
 
-                # Update description
-                shiny::updateTextAreaInput(session, paste0("item_description_", i), value = parsed$description)
-                cat("      Description updated (length:", nchar(parsed$description), ")\n")
+                  # Update description
+                  shiny::updateTextAreaInput(session, paste0("item_description_", i), value = parsed$description)
+                  cat("      Description updated (length:", nchar(parsed$description), ")\n")
 
-                updateNumericInput(session, paste0("starting_price_", i), value = parsed$price)
-                cat("      Price updated\n")
+                  updateNumericInput(session, paste0("starting_price_", i), value = parsed$price)
+                  cat("      Price updated\n")
 
-                updateSelectInput(session, paste0("condition_", i), selected = parsed$condition)
-                cat("      Condition updated\n")
-                
+                  updateSelectInput(session, paste0("condition_", i), selected = parsed$condition)
+                  cat("      Condition updated\n")
+
+                  cat("   ✅ Form fields updated\n")
+                }, delay = 0.1)
+
                 # Save draft
                 draft_key <- as.character(i)
                 isolate({
@@ -707,7 +729,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
                     timestamp = Sys.time()
                   )
                 })
-                
+
                 cat("   💾 Draft saved\n")
 
                 # Save AI data to card_processing table for pre-population on next upload
@@ -846,12 +868,27 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
                 # which has caused issues before (see showNotification problems)
                 # Skipping visual indicator to keep code simple and reliable
                 
-                # Show success
+                # Build success message with token usage
+                success_msg <- sprintf("Extraction complete! Price: €%.2f", parsed$price)
+                if (!is.null(result$usage)) {
+                  total_tokens <- result$usage$input_tokens + result$usage$output_tokens
+                  success_msg <- sprintf("Extraction complete! Price: €%.2f (%d tokens)", parsed$price, total_tokens)
+                }
+
+                # Close notification with success message
+                removeNotification(notification_id)
+                showNotification(
+                  success_msg,
+                  duration = 5,
+                  type = "message"
+                )
+
+                # Show success in UI
                 output[[paste0("ai_status_", i)]] <- renderUI({
                   div(
                     style = "padding: 12px; background: #e8f5e9; border-left: 4px solid #4caf50; margin-top: 10px;",
                     icon("check-circle", style = "color: #2e7d32;"),
-                    sprintf(" Extraction complete! Recommended price: €%.2f", parsed$price)
+                    paste("✅", success_msg)
                   )
                 })
                 
@@ -874,21 +911,39 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
                 
                 # Show error
                 cat("   ❌ API error:", result$error, "\n")
+
+                # Close notification with error
+                removeNotification(notification_id)
+                showNotification(
+                  paste("Error:", result$error),
+                  duration = NULL,  # Keep error visible
+                  type = "error"
+                )
+
                 output[[paste0("ai_status_", i)]] <- renderUI({
                   div(
                     style = "padding: 12px; background: #ffebee; border-left: 4px solid #f44336; margin-top: 10px;",
                     icon("exclamation-circle", style = "color: #c62828;"),
-                    paste(" Error:", result$error)
+                    paste("❌ Error:", result$error)
                   )
                 })
               }
           }, error = function(e) {
             cat("   💥 Unexpected error:", e$message, "\n")
+
+            # Close notification with error
+            removeNotification(notification_id)
+            showNotification(
+              paste("Unexpected error:", e$message),
+              duration = NULL,
+              type = "error"
+            )
+
             output[[paste0("ai_status_", i)]] <- renderUI({
               div(
                 style = "padding: 12px; background: #ffebee; border-left: 4px solid #f44336; margin-top: 10px;",
                 icon("exclamation-circle", style = "color: #c62828;"),
-                paste(" Unexpected error:", e$message)
+                paste("❌ Unexpected error:", e$message)
               )
             })
           }, finally = {
