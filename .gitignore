@@ -46,3 +46,9 @@ Thumbs.db
 
 # Cache
 .serena/cache/
+
+# Credentials and secrets (NEVER commit these!)
+.Renviron
+Ebay_Credentials.*
+data/ebay_tokens.rds
+data/ebay_app_token.rds
