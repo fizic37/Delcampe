@@ -2,13 +2,13 @@
 % Please edit documentation in R/mod_tracking_viewer.R
 \name{mod_tracking_viewer_ui}
 \alias{mod_tracking_viewer_ui}
-\title{tracking_viewer UI Function}
+\title{Enhanced Tracking Viewer UI}
 \usage{
 mod_tracking_viewer_ui(id)
 }
 \arguments{
-\item{id, input, output, session}{Internal parameters for {shiny}.}
+\item{id}{Module ID}
 }
 \description{
-A shiny Module for viewing processing tracking data.
+Shows processing history with DT::datatable, filters, and search
 }

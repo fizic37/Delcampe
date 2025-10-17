@@ -2,10 +2,13 @@
 % Please edit documentation in R/mod_tracking_viewer.R
 \name{mod_tracking_viewer_server}
 \alias{mod_tracking_viewer_server}
-\title{tracking_viewer Server Functions}
+\title{Enhanced Tracking Viewer Server}
 \usage{
 mod_tracking_viewer_server(id)
 }
+\arguments{
+\item{id}{Module ID}
+}
 \description{
-tracking_viewer Server Functions
+Server logic for tracking viewer with DT::datatable
 }
