@@ -4,6 +4,7 @@
 library(httr2)
 library(jsonlite)
 library(base64enc)
+library(digest)
 library(R6)
 
 # eBay API Configuration Class
@@ -238,7 +239,17 @@ EbayOAuth <- R6::R6Class("EbayOAuth",
       }
       return(private$access_token)
     },
-    
+
+    # Get current refresh token
+    get_refresh_token = function() {
+      return(private$refresh_token)
+    },
+
+    # Get current token expiry
+    get_token_expiry = function() {
+      return(private$token_expiry)
+    },
+
     # Save tokens to file
     save_tokens = function() {
       tokens <- list(
@@ -268,6 +279,102 @@ EbayOAuth <- R6::R6Class("EbayOAuth",
     # Check if authenticated
     is_authenticated = function() {
       return(!is.null(private$access_token) && !self$needs_refresh())
+    },
+
+    # Fetch eBay user identity (for multi-account support)
+    get_user_info = function() {
+      token <- self$get_access_token()
+
+      if (is.null(token)) {
+        return(list(
+          success = FALSE,
+          error = "No access token available"
+        ))
+      }
+
+      # Try to decode JWT token to extract user info
+      # JWT tokens have 3 parts separated by dots: header.payload.signature
+      tryCatch({
+        # Split token and decode payload (middle part)
+        token_parts <- strsplit(token, "\\.")[[1]]
+        if (length(token_parts) >= 2) {
+          # Decode base64url payload (JWT uses base64url encoding)
+          payload_encoded <- token_parts[2]
+
+          # Add padding if needed for base64 decoding
+          missing_padding <- (4 - nchar(payload_encoded) %% 4) %% 4
+          if (missing_padding > 0) {
+            payload_encoded <- paste0(payload_encoded, paste(rep("=", missing_padding), collapse = ""))
+          }
+
+          # Replace URL-safe characters with standard base64
+          payload_encoded <- gsub("-", "+", payload_encoded)
+          payload_encoded <- gsub("_", "/", payload_encoded)
+
+          # Decode
+          payload_json <- rawToChar(base64decode(payload_encoded))
+          payload_data <- jsonlite::fromJSON(payload_json)
+
+          # Extract user info from JWT payload
+          # eBay tokens include user_name and user_id in the payload
+          user_id <- payload_data$`https://apiz.ebay.com/useridz`
+          username <- payload_data$`https://apiz.ebay.com/usernamez`
+
+          # Fallback to alternative claim names if primary ones don't exist
+          if (is.null(user_id)) user_id <- payload_data$user_id
+          if (is.null(username)) username <- payload_data$username
+          if (is.null(username)) username <- payload_data$sub
+
+          if (!is.null(user_id) || !is.null(username)) {
+            return(list(
+              success = TRUE,
+              user_id = if (!is.null(user_id)) as.character(user_id) else "unknown",
+              username = if (!is.null(username)) as.character(username) else paste0("user_", substr(user_id, 1, 8))
+            ))
+          }
+        }
+
+        # If JWT decoding fails, fall back to API call
+        user_url <- paste0(
+          private$config$get_base_url(),
+          "/commerce/identity/v1/user/"
+        )
+
+        response <- request(user_url) |>
+          req_headers("Authorization" = paste("Bearer", token)) |>
+          req_perform()
+
+        user_data <- resp_body_json(response)
+
+        return(list(
+          success = TRUE,
+          user_id = user_data$userId,
+          username = user_data$username
+        ))
+
+      }, error = function(e) {
+        # If all else fails, generate user info from token
+        cat("⚠️ Could not fetch user info from API or JWT, using fallback\n")
+        cat("   Error:", e$message, "\n")
+
+        # Generate a user identifier from the token hash
+        token_hash <- substr(digest::digest(token, algo = "md5"), 1, 8)
+
+        return(list(
+          success = TRUE,
+          user_id = paste0("ebay_user_", token_hash),
+          username = paste0("eBay_", private$config$environment, "_", token_hash)
+        ))
+      })
+    },
+
+    # Inject stored tokens (for account switching)
+    set_tokens = function(access_token, refresh_token, token_expiry) {
+      private$access_token <- access_token
+      private$refresh_token <- refresh_token
+      private$token_expiry <- token_expiry
+
+      message("🔑 Tokens injected (expires: ", format(token_expiry, "%H:%M"), ")")
     }
   )
 )
@@ -285,6 +392,59 @@ EbayInventoryAPI <- R6::R6Class("EbayInventoryAPI",
       private$config <- config
     },
     
+    # Get all inventory locations (diagnostic)
+    get_locations = function() {
+      url <- paste0(
+        private$config$get_base_url(),
+        "/sell/inventory/v1/location"
+      )
+
+      tryCatch({
+        response <- request(url) |>
+          req_method("GET") |>
+          req_headers(
+            "Authorization" = paste("Bearer", private$oauth$get_access_token()),
+            "Content-Type" = "application/json"
+          ) |>
+          req_perform()
+
+        result <- resp_body_json(response)
+        return(list(success = TRUE, locations = result$locations))
+
+      }, error = function(e) {
+        return(list(success = FALSE, error = e$message))
+      })
+    },
+
+    # Get user registration information (for diagnostics)
+    get_registration_address = function() {
+      url <- "https://api.ebay.com/commerce/identity/v1/user/"
+
+      tryCatch({
+        response <- request(url) |>
+          req_method("GET") |>
+          req_headers(
+            "Authorization" = paste("Bearer", private$oauth$get_access_token()),
+            "Content-Type" = "application/json"
+          ) |>
+          req_perform()
+
+        result <- resp_body_json(response)
+        reg_addr <- result$registrationAddress
+
+        return(list(
+          success = TRUE,
+          country = reg_addr$country %||% NA,
+          city = reg_addr$city %||% NA,
+          address = reg_addr$addressLine1 %||% NA,
+          postal_code = reg_addr$postalCode %||% NA
+        ))
+
+      }, error = function(e) {
+        return(list(success = FALSE, error = e$message))
+      })
+    },
+
     # Create or update inventory location
     create_location = function(merchant_location_key, location_data) {
       url <- paste0(
@@ -292,20 +452,63 @@ EbayInventoryAPI <- R6::R6Class("EbayInventoryAPI",
         "/sell/inventory/v1/location/",
         merchant_location_key
       )
-      
+
+      # Debug: Print request details
+      cat("   DEBUG - Location Request:\n")
+      cat("      URL:", url, "\n")
+      cat("      Method: PUT\n")
+      cat("      Body:", jsonlite::toJSON(location_data, auto_unbox = TRUE), "\n")
+
       tryCatch({
         response <- request(url) |>
-          req_method("POST") |>
+          req_method("PUT") |>
           req_headers(
             "Authorization" = paste("Bearer", private$oauth$get_access_token()),
             "Content-Type" = "application/json",
             "Content-Language" = "en-US"
           ) |>
           req_body_json(location_data) |>
+          req_error(function(resp) {
+            status <- resp_status(resp)
+            cat("   DEBUG - Location Error Response:\n")
+            cat("      Status:", status, resp_status_desc(resp), "\n")
+
+            # Try to get response body as text first
+            body_text <- tryCatch(resp_body_string(resp), error = function(e) {
+              cat("      (Could not read response body as text)\n")
+              NULL
+            })
+
+            if (!is.null(body_text)) {
+              cat("      Raw body:", body_text, "\n")
+            }
+
+            # Extract detailed error from eBay
+            body <- tryCatch(resp_body_json(resp), error = function(e) NULL)
+            if (!is.null(body) && !is.null(body$errors)) {
+              cat("   eBay Location Error Details:\n")
+              errors <- sapply(body$errors, function(err) {
+                msg <- paste0(err$errorId, ": ", err$message)
+                cat("      Error ID:", err$errorId, "\n")
+                cat("      Message:", err$message, "\n")
+                if (!is.null(err$parameters)) {
+                  cat("      Parameters:\n")
+                  for (param in err$parameters) {
+                    cat("         -", param$name, "=", param$value, "\n")
+                  }
+                }
+                msg
+              })
+              stop(paste(errors, collapse = "; "), call. = FALSE)
+            } else {
+              stop(paste("HTTP", status, resp_status_desc(resp)), call. = FALSE)
+            }
+          }) |>
           req_perform()
-        
+
+        cat("   ✅ Location request successful\n")
         return(list(success = TRUE))
-        
+
       }, error = function(e) {
         return(list(success = FALSE, error = e$message))
       })
@@ -349,15 +552,30 @@ EbayInventoryAPI <- R6::R6Class("EbayInventoryAPI",
               return(FALSE)  # Not an error
             }
 
-            # Extract error details from eBay response
+            # Extract error details from eBay response with enhanced debugging
             body <- tryCatch(resp_body_json(resp), error = function(e) NULL)
             if (!is.null(body) && !is.null(body$errors)) {
-              error_msg <- paste(
-                sapply(body$errors, function(err) {
-                  paste0(err$errorId, ": ", err$message)
-                }),
-                collapse = "; "
-              )
+              cat("   DEBUG - eBay Inventory Item Error Details:\n")
+              error_msgs <- sapply(body$errors, function(err) {
+                msg <- paste0(err$errorId, ": ", err$message)
+                cat("      Error ID:", err$errorId, "\n")
+                cat("      Message:", err$message, "\n")
+
+                # Show parameters if available
+                if (!is.null(err$parameters)) {
+                  cat("      Parameters:\n")
+                  for (param in err$parameters) {
+                    cat("         -", param$name, "=", param$value, "\n")
+                  }
+                }
+
+                # Show domain/subdomain if available
+                if (!is.null(err$domain)) cat("      Domain:", err$domain, "\n")
+                if (!is.null(err$subdomain)) cat("      Subdomain:", err$subdomain, "\n")
+
+                msg
+              })
+              error_msg <- paste(error_msgs, collapse = "; ")
               stop(error_msg, call. = FALSE)
             } else {
               stop(paste("HTTP", status, resp_status_desc(resp)), call. = FALSE)
@@ -561,16 +779,187 @@ EbayInventoryAPI <- R6::R6Class("EbayInventoryAPI",
   )
 )
 
+# eBay Media API Client
+# Handles image uploads to eBay Picture Services (EPS)
+EbayMediaAPI <- R6::R6Class("EbayMediaAPI",
+  public = list(
+    config = NULL,
+    oauth = NULL,
+
+    initialize = function(config, oauth) {
+      self$config <- config
+      self$oauth <- oauth
+    },
+
+    # Upload image file to eBay Picture Services
+    # Returns: list(success = TRUE/FALSE, image_url = "...", image_id = "...", expiration = "...", error = "...")
+    upload_image = function(image_path) {
+      # Step 1: Validate file exists and is supported image format
+      if (!file.exists(image_path)) {
+        return(list(success = FALSE, error = paste("File not found:", image_path)))
+      }
+
+      ext <- tolower(tools::file_ext(image_path))
+      if (!ext %in% c("jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp")) {
+        return(list(success = FALSE, error = "Unsupported format. Use JPG, PNG, GIF, BMP, TIFF, or WEBP"))
+      }
+
+      # Step 2: Construct multipart upload request
+      base_url <- if (self$config$environment == "sandbox") {
+        "https://api.sandbox.ebay.com"
+      } else {
+        "https://api.ebay.com"
+      }
+
+      token <- self$oauth$get_access_token()
+
+      # Map file extension to MIME type
+      mime_type <- switch(ext,
+        "jpg" = "image/jpeg",
+        "jpeg" = "image/jpeg",
+        "png" = "image/png",
+        "gif" = "image/gif",
+        "bmp" = "image/bmp",
+        "tiff" = "image/tiff",
+        "webp" = "image/webp",
+        paste0("image/", ext)
+      )
+
+      req <- httr2::request(paste0(base_url, "/commerce/media/v1_beta/image/create_image_from_file")) |>
+        httr2::req_method("POST") |>
+        httr2::req_headers(
+          Authorization = paste("Bearer", token),
+          "Content-Language" = "en-US"
+        ) |>
+        httr2::req_body_multipart(
+          image = curl::form_file(image_path, type = mime_type)
+        )
+
+      # Step 3: Perform request and extract image_id from Location header
+      resp <- tryCatch({
+        httr2::req_perform(req)
+      }, error = function(e) {
+        return(list(success = FALSE, error = paste("Upload failed:", e$message)))
+      })
+
+      # Check if response is an error list (from tryCatch)
+      if (is.list(resp) && !is.null(resp$error)) {
+        return(resp)
+      }
+
+      status <- httr2::resp_status(resp)
+      if (status != 201) {
+        # Try to extract eBay error details with enhanced logging
+        error_msg <- tryCatch({
+          # Log response details for debugging
+          cat("   DEBUG - Media API Response:\n")
+          cat("      Status:", status, "\n")
+          cat("      Content-Type:", httr2::resp_header(resp, "content-type") %||% "unknown", "\n")
+
+          # Try to get response body as text first
+          body_text <- tryCatch(httr2::resp_body_string(resp), error = function(e) NULL)
+          if (!is.null(body_text) && nchar(body_text) > 0) {
+            cat("      Body (first 200 chars):", substr(body_text, 1, 200), "\n")
+          }
+
+          # Try JSON parsing
+          body <- httr2::resp_body_json(resp)
+          if (!is.null(body$errors) && length(body$errors) > 0) {
+            paste0("eBay error ", body$errors[[1]]$errorId, ": ", body$errors[[1]]$message)
+          } else if (!is.null(body$error)) {
+            paste0("eBay error: ", body$error)
+          } else {
+            paste("Upload failed with status", status, httr2::resp_status_desc(resp))
+          }
+        }, error = function(e) {
+          paste("Upload failed with status", status, httr2::resp_status_desc(resp))
+        })
+        return(list(success = FALSE, error = error_msg))
+      }
+
+      # Extract image_id from Location header
+      location <- httr2::resp_header(resp, "location")
+      if (is.null(location)) {
+        location <- httr2::resp_header(resp, "Location")
+      }
+
+      if (is.null(location)) {
+        return(list(success = FALSE, error = "Location header not found in response"))
+      }
+
+      image_id <- gsub(".*/image/", "", location)
+
+      # Step 4: Retrieve EPS URL via getImage
+      image_details <- self$get_image(image_id)
+      if (!image_details$success) {
+        return(image_details)
+      }
+
+      return(list(
+        success = TRUE,
+        image_url = image_details$image_url,
+        image_id = image_id,
+        expiration = image_details$expiration_date
+      ))
+    },
+
+    # Retrieve image details from eBay (internal method)
+    # Returns: list(success = TRUE/FALSE, image_url = "...", expiration_date = "...", error = "...")
+    get_image = function(image_id) {
+      base_url <- if (self$config$environment == "sandbox") {
+        "https://api.sandbox.ebay.com"
+      } else {
+        "https://api.ebay.com"
+      }
+
+      token <- self$oauth$get_access_token()
+
+      req <- httr2::request(paste0(base_url, "/commerce/media/v1_beta/image/", image_id)) |>
+        httr2::req_method("GET") |>
+        httr2::req_headers(
+          Authorization = paste("Bearer", token),
+          "Content-Language" = "en-US"
+        )
+
+      resp <- tryCatch({
+        httr2::req_perform(req)
+      }, error = function(e) {
+        return(list(success = FALSE, error = paste("Failed to retrieve image:", e$message)))
+      })
+
+      # Check if response is an error list (from tryCatch)
+      if (is.list(resp) && !is.null(resp$error)) {
+        return(resp)
+      }
+
+      status <- httr2::resp_status(resp)
+      if (status != 200) {
+        return(list(success = FALSE, error = paste("Get image failed with status", status)))
+      }
+
+      data <- httr2::resp_body_json(resp)
+
+      return(list(
+        success = TRUE,
+        image_url = data$imageUrl,
+        expiration_date = data$expirationDate
+      ))
+    }
+  )
+)
+
 # Initialize eBay API connection
 #' @export
 init_ebay_api <- function(environment = NULL) {
   config <- EbayAPIConfig$new(environment)
   oauth <- EbayOAuth$new(config)
   inventory_api <- EbayInventoryAPI$new(oauth, config)
-  
+  media_api <- EbayMediaAPI$new(config, oauth)
+
   return(list(
     config = config,
     oauth = oauth,
-    inventory = inventory_api
+    inventory = inventory_api,
+    media = media_api
   ))
 }

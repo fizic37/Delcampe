@@ -5,15 +5,21 @@ Authors@R:
     person("Marius", "Tita", , "marius.tita81@gmail.com", role = "cre")
 Description: This app process images uploaded by an user. It uses LLM to extract meaning information and sends them to an API.
 License: MIT + file LICENSE
-Imports: 
+Imports:
     base64enc,
     bslib,
     config,
+    curl,
+    DBI,
+    digest,
+    DT,
     golem,
     httr2,
+    jsonlite,
     later,
     magick,
     reticulate,
+    RSQLite,
     shiny,
     shinyjs
 Encoding: UTF-8

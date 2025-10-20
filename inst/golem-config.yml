@@ -2,7 +2,42 @@ default:
   golem_name: Delcampe
   golem_version: 0.0.0.9000
   app_prod: no
+  
+  # eBay API Configuration
+  ebay:
+    environment: sandbox  # Use 'sandbox' for testing, 'production' for live
+    
+    # OAuth Settings
+    oauth:
+      redirect_uri: "http://localhost:3838/callback"
+      scope: "https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment"
+    
+    # Default listing settings
+    listing_defaults:
+      marketplace_id: "EBAY_US"
+      currency: "USD"
+      category_id: "914"  # Postcards category
+      listing_format: "FIXED_PRICE"
+      
+    # Image settings  
+    images:
+      max_images: 12
+      max_size_mb: 12
+      allowed_formats: ["jpg", "jpeg", "png", "gif"]
+      
 production:
   app_prod: yes
+  golem_name: Delcampe
+  golem_version: 0.0.0.9000
+  
+  ebay:
+    environment: production
+    oauth:
+      redirect_uri: "https://your-domain.com/callback"  # Update with your production URL
+      
 dev:
   golem_wd: !expr golem::pkg_path()
+  
+  ebay:
+    environment: sandbox
+    debug_mode: true

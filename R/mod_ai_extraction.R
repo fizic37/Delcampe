@@ -6,11 +6,12 @@
 #'
 #' @param id,input,output,session Internal parameters for {shiny}
 #' @param image_path Reactive containing current image path for extraction
+#' @param card_id Reactive containing the card_id for database tracking (optional)
 #' @param session Parent session for notifications and updates
 #'
 #' @noRd
 #' @import shiny
-mod_ai_extraction_server <- function(id, image_path = reactive(NULL), session = NULL) {
+mod_ai_extraction_server <- function(id, image_path = reactive(NULL), card_id = reactive(NULL), session = NULL) {
   moduleServer(id, function(input, output, session_inner) {
     ns <- session_inner$ns
     `%||%` <- function(a, b) if (is.null(a) || length(a) == 0 || all(is.na(a))) b else a
@@ -22,8 +23,64 @@ mod_ai_extraction_server <- function(id, image_path = reactive(NULL), session = 
     rv <- reactiveValues(
       extracting = FALSE,
       last_result = NULL,
-      extraction_history = list()
+      extraction_history = list(),
+      loaded_existing_data = FALSE,
+      existing_card_data = NULL
     )
+
+    # Check for duplicates when image changes
+    observe({
+      req(image_path())
+
+      # Calculate hash of current image
+      current_hash <- calculate_image_hash(image_path())
+
+      if (is.null(current_hash)) {
+        return()
+      }
+
+      # Check if this combined image has been processed before
+      existing_card <- find_card_processing(current_hash, "combined")
+
+      if (!is.null(existing_card) && !is.null(existing_card$ai_title)) {
+        # Found existing AI extraction data
+        rv$loaded_existing_data <- TRUE
+        rv$existing_card_data <- existing_card
+
+        showNotification(
+          HTML(paste0(
+            "✨ <strong>Previous AI extraction found!</strong><br>",
+            "Model: ", existing_card$ai_model %||% "Unknown", "<br>",
+            "Extracted: ", format_timestamp(existing_card$last_processed)
+          )),
+          type = "message",
+          duration = 8,
+          session = notification_session
+        )
+
+        # Track reuse if we have a card_id
+        if (!is.null(card_id()) && !is.null(existing_card$card_id)) {
+          tryCatch({
+            track_session_activity(
+              session_id = notification_session$token,
+              card_id = card_id(),
+              action = "ai_data_reused",
+              details = list(
+                source_card_id = existing_card$card_id,
+                model = existing_card$ai_model
+              )
+            )
+          }, error = function(e) {
+            message("⚠️ Failed to track AI data reuse: ", e$message)
+          })
+        }
+
+        message("✅ Existing AI data found for hash: ", substr(current_hash, 1, 8), "...")
+      } else {
+        rv$loaded_existing_data <- FALSE
+        rv$existing_card_data <- NULL
+      }
+    })
 
     # Get AI provider configuration
     get_ai_config <- function() {
@@ -333,6 +390,45 @@ mod_ai_extraction_server <- function(id, image_path = reactive(NULL), session = 
         rv$extraction_history <- rv$extraction_history[1:10]
       }
 
+      # Save AI extraction results to database if successful and we have a card_id
+      if (result$success && !is.null(card_id()) && !isTRUE(rv$loaded_existing_data)) {
+        tryCatch({
+          # Update card_processing with AI data
+          save_card_processing(
+            card_id = card_id(),
+            crop_paths = NULL,
+            h_boundaries = NULL,
+            v_boundaries = NULL,
+            grid_rows = NULL,
+            grid_cols = NULL,
+            extraction_dir = NULL,
+            ai_data = list(
+              title = result$title,
+              description = result$description,
+              condition = result$condition %||% "Good",
+              price = result$recommended_price,
+              model = result$model_used %||% "unknown"
+            )
+          )
+
+          # Track AI extraction in session_activity
+          track_session_activity(
+            session_id = notification_session$token,
+            card_id = card_id(),
+            action = "ai_extracted",
+            details = list(
+              model = result$model_used,
+              provider = result$provider_used,
+              success = TRUE
+            )
+          )
+
+          message("✅ AI extraction saved to database for card_id: ", card_id())
+        }, error = function(e) {
+          message("⚠️ Failed to save AI extraction: ", e$message)
+        })
+      }
+
       # Show completion notification
       if (!is.null(notification_session)) {
         if (result$success) {
@@ -407,6 +503,24 @@ mod_ai_extraction_server <- function(id, image_path = reactive(NULL), session = 
       ))
     }
 
+    # Get existing AI data for pre-filling forms
+    get_existing_ai_data <- function() {
+      if (isTRUE(rv$loaded_existing_data) && !is.null(rv$existing_card_data)) {
+        return(list(
+          has_existing = TRUE,
+          title = rv$existing_card_data$ai_title,
+          description = rv$existing_card_data$ai_description,
+          condition = rv$existing_card_data$ai_condition,
+          price = rv$existing_card_data$ai_price,
+          model = rv$existing_card_data$ai_model,
+          last_processed = rv$existing_card_data$last_processed,
+          card_id = rv$existing_card_data$card_id
+        ))
+      } else {
+        return(list(has_existing = FALSE))
+      }
+    }
+
     # Return interface for parent modules
     return(list(
       perform_extraction = perform_extraction,
@@ -414,7 +528,9 @@ mod_ai_extraction_server <- function(id, image_path = reactive(NULL), session = 
       get_status = reactive(get_extraction_status()),
       get_summary = reactive(get_ai_summary()),
       is_extracting = reactive(rv$extracting),
-      last_result = reactive(rv$last_result)
+      last_result = reactive(rv$last_result),
+      get_existing_ai_data = reactive(get_existing_ai_data()),
+      has_existing_data = reactive(isTRUE(rv$loaded_existing_data))
     ))
   })
 }

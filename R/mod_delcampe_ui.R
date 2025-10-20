@@ -130,7 +130,7 @@ mod_delcampe_ui_server <- function(id) {
 
             numericInput(
               ns("image_price"),
-              "Starting Price (EUR):",
+              "Starting Price ($):",
               value = 1.00,
               min = 0.01,
               step = 0.10,

@@ -26,7 +26,7 @@ track_ai_extraction(
 
 \item{condition}{Extracted condition}
 
-\item{recommended_price}{Recommended price in Euros}
+\item{recommended_price}{Recommended price in US Dollars (USD)}
 
 \item{success}{Whether extraction succeeded}
 

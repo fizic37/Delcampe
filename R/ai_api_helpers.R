@@ -506,13 +506,13 @@ build_enhanced_postal_card_prompt <- function(extraction_type = "individual", ca
       "   - Good: Minor edge wear, images clear\n",
       "   - Fair: Moderate wear, some fading\n",
       "   - Poor: Significant damage or fading\n\n",
-      "4. RECOMMENDED_PRICE: Suggest eBay sale price in Euros\n",
+      "4. RECOMMENDED_PRICE: Suggest eBay sale price in US Dollars (USD)\n",
       "   - Consider age (older = more valuable)\n",
       "   - Consider subjects (tourist landmarks > generic)\n",
       "   - Consider condition\n",
       "   - Consider quantity (more cards = higher total)\n",
-      "   - Typical range per card: €1.50 - €10.00\n",
-      "   - Format: numeric value only (e.g., 15.00 for a lot of 10)\n\n",
+      "   - Typical range per card: $2.00 - $12.00\n",
+      "   - Format: numeric value only (e.g., 20.00 for a lot of 10)\n\n",
       "Note: This is a lot of ", card_count, " postal cards.\n\n",
       "Provide response in this EXACT format:\n",
       "TITLE: [title here]\n",
@@ -537,13 +537,13 @@ build_enhanced_postal_card_prompt <- function(extraction_type = "individual", ca
       "   - Good: Minor edge wear, image clear\n",
       "   - Fair: Moderate wear, some fading\n",
       "   - Poor: Significant damage or fading\n\n",
-      "4. RECOMMENDED_PRICE: Suggest eBay sale price in Euros\n",
+      "4. RECOMMENDED_PRICE: Suggest eBay sale price in US Dollars (USD)\n",
       "   - Consider age (older = more valuable)\n",
       "   - Consider subject (tourist landmarks > generic scenes)\n",
       "   - Consider condition\n",
       "   - Consider printing quality visible in image\n",
-      "   - Typical range: €1.50 - €10.00\n",
-      "   - Format: numeric value only (e.g., 2.50)\n\n",
+      "   - Typical range: $2.00 - $12.00\n",
+      "   - Format: numeric value only (e.g., 3.50)\n\n",
       "Provide response in this EXACT format:\n",
       "TITLE: [title here]\n",
       "DESCRIPTION: [description here]\n",
@@ -688,7 +688,7 @@ parse_enhanced_ai_response <- function(ai_response) {
     
     # Validate and clamp price to reasonable range
     if (!is.na(price) && price > 0) {
-      price <- max(0.50, min(price, 50.00))  # Clamp between €0.50 and €50.00
+      price <- max(0.50, min(price, 60.00))  # Clamp between $0.50 and $60.00
     } else {
       price <- 2.50  # Default
     }
@@ -736,7 +736,7 @@ get_available_models <- function() {
 }
 
 #' Determine Provider from Model Name
-#' 
+#'
 #' @param model_name Model identifier string
 #' @return "claude" or "openai"
 #' @noRd
@@ -747,5 +747,109 @@ get_provider_from_model <- function(model_name) {
     return("openai")
   } else {
     return("claude")  # Default
+  }
+}
+
+#' Get extraction prompt for combined images
+#'
+#' @description Returns the prompt for extracting metadata from combined face+verso images
+#' @return Character string with the extraction prompt
+#' @export
+get_extraction_prompt <- function() {
+  # Use the existing enhanced prompt for individual cards
+  build_enhanced_postal_card_prompt(extraction_type = "individual", card_count = 1)
+}
+
+#' Extract metadata with LLM from combined image
+#'
+#' @description Wrapper function to extract postal card metadata using configured LLM
+#' @param image_path Path to the combined image file
+#' @param api_key API key for the LLM provider (optional, uses config if not provided)
+#' @param model Model name (optional, uses config default if not provided)
+#' @param prompt Custom prompt (optional, uses default extraction prompt if not provided)
+#' @return List with success status, extracted data (title, description, condition, price), and error info
+#' @export
+extract_with_llm <- function(image_path, api_key = NULL, model = NULL, prompt = NULL) {
+
+  # Get configuration
+  config <- get_llm_config()
+
+  # Use provided values or fall back to config
+  if (is.null(model)) {
+    model <- config$default_model
+  }
+
+  if (is.null(prompt)) {
+    prompt <- get_extraction_prompt()
+  }
+
+  # Determine provider and get API key
+  provider <- get_provider_from_model(model)
+
+  if (is.null(api_key)) {
+    if (provider == "claude") {
+      api_key <- config$claude_api_key
+    } else {
+      api_key <- config$openai_api_key
+    }
+  }
+
+  # Validate API key
+  if (is.null(api_key) || api_key == "") {
+    return(list(
+      success = FALSE,
+      title = NULL,
+      description = NULL,
+      condition = NULL,
+      price = NULL,
+      model = model,
+      error = paste(tools::toTitleCase(provider), "API key not configured")
+    ))
+  }
+
+  # Call appropriate API
+  if (provider == "claude") {
+    result <- call_claude_api(
+      image_path = image_path,
+      model_name = model,
+      api_key = api_key,
+      prompt = prompt,
+      temperature = config$temperature,
+      max_tokens = config$max_tokens
+    )
+  } else {
+    result <- call_openai_api(
+      image_path = image_path,
+      model_name = model,
+      api_key = api_key,
+      prompt = prompt,
+      temperature = config$temperature,
+      max_tokens = config$max_tokens
+    )
+  }
+
+  # Parse response if successful
+  if (result$success) {
+    parsed <- parse_enhanced_ai_response(result$content)
+
+    return(list(
+      success = TRUE,
+      title = parsed$title,
+      description = parsed$description,
+      condition = parsed$condition,
+      price = parsed$price,
+      model = model,
+      error = NULL
+    ))
+  } else {
+    return(list(
+      success = FALSE,
+      title = NULL,
+      description = NULL,
+      condition = NULL,
+      price = NULL,
+      model = model,
+      error = result$error
+    ))
   }
 }

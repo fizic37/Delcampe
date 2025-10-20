@@ -176,7 +176,58 @@ initialize_tracking_db <- function(db_path = "inst/app/data/tracking.sqlite") {
         FOREIGN KEY (image_id) REFERENCES images(image_id)
       )
     ")
-    
+
+    # eBay Listings table (comprehensive tracking for new 3-layer architecture)
+    DBI::dbExecute(con, "
+      CREATE TABLE IF NOT EXISTS ebay_listings (
+        listing_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        card_id INTEGER,
+        session_id TEXT NOT NULL,
+        ebay_item_id TEXT,
+        ebay_offer_id TEXT,
+        ebay_user_id TEXT,
+        ebay_username TEXT,
+        sku TEXT UNIQUE NOT NULL,
+        status TEXT DEFAULT 'draft',
+        environment TEXT DEFAULT 'sandbox',
+        title TEXT,
+        description TEXT,
+        price REAL,
+        quantity INTEGER DEFAULT 1,
+        condition TEXT,
+        category_id TEXT DEFAULT '914',
+        listing_url TEXT,
+        image_urls TEXT,
+        aspects TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        listed_at DATETIME,
+        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+        error_message TEXT,
+        FOREIGN KEY (card_id) REFERENCES postal_cards(card_id),
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+      )
+    ")
+
+    # ========== SCHEMA MIGRATIONS ==========
+
+    # Migration: Add ebay_user_id and ebay_username columns if they don't exist
+    tryCatch({
+      # Check if columns exist
+      columns <- DBI::dbGetQuery(con, "PRAGMA table_info(ebay_listings)")
+
+      if (!"ebay_user_id" %in% columns$name) {
+        DBI::dbExecute(con, "ALTER TABLE ebay_listings ADD COLUMN ebay_user_id TEXT")
+        message("✅ Added ebay_user_id column to ebay_listings table")
+      }
+
+      if (!"ebay_username" %in% columns$name) {
+        DBI::dbExecute(con, "ALTER TABLE ebay_listings ADD COLUMN ebay_username TEXT")
+        message("✅ Added ebay_username column to ebay_listings table")
+      }
+    }, error = function(e) {
+      message("⚠️ Migration warning: ", e$message)
+    })
+
     # ========== INDEXES ==========
     
     indexes <- c(
@@ -199,7 +250,12 @@ initialize_tracking_db <- function(db_path = "inst/app/data/tracking.sqlite") {
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_card_processing_card ON card_processing(card_id)",
       "CREATE INDEX IF NOT EXISTS idx_session_activity_session ON session_activity(session_id)",
       "CREATE INDEX IF NOT EXISTS idx_session_activity_card ON session_activity(card_id)",
-      "CREATE INDEX IF NOT EXISTS idx_session_activity_action ON session_activity(action)"
+      "CREATE INDEX IF NOT EXISTS idx_session_activity_action ON session_activity(action)",
+      # eBay Listings indexes
+      "CREATE INDEX IF NOT EXISTS idx_ebay_listings_card ON ebay_listings(card_id)",
+      "CREATE INDEX IF NOT EXISTS idx_ebay_listings_session ON ebay_listings(session_id)",
+      "CREATE INDEX IF NOT EXISTS idx_ebay_listings_status ON ebay_listings(status)",
+      "CREATE INDEX IF NOT EXISTS idx_ebay_listings_sku ON ebay_listings(sku)"
     )
     
     for (index in indexes) {
@@ -980,7 +1036,7 @@ get_tracking_statistics <- function() {
 #' @param title Extracted title
 #' @param description Extracted description
 #' @param condition Extracted condition
-#' @param recommended_price Recommended price in Euros
+#' @param recommended_price Recommended price in US Dollars (USD)
 #' @param success Whether extraction succeeded
 #' @param error_message Error message if failed
 #' @return Extraction ID
@@ -1504,3 +1560,208 @@ message("✅ EXTENDED tracking system loaded with AI extraction, eBay posting & 
 message("ℹ️ New tables: ai_extractions, ebay_posts")
 message("ℹ️ New functions: track_ai_extraction, track_ebay_post, get_image_by_path")
 message("ℹ️ Deduplication functions: find_existing_processing, validate_existing_crops, copy_existing_crops, mark_processing_reused")
+
+# ==== TRACKING VIEWER HELPER FUNCTIONS ====
+
+#' Get tracking data with filters
+#'
+#' @description Query processing history with date and eBay status filters
+#'
+#' @param date_filter SQL WHERE clause for date filtering
+#' @param ebay_filter SQL WHERE clause for eBay status filtering
+#' @return Data frame with tracking data
+#' @export
+get_tracking_data <- function(date_filter = "", ebay_filter = "") {
+  tryCatch({
+    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    on.exit(DBI::dbDisconnect(con), add = TRUE)
+
+    query <- sprintf("
+      SELECT
+        pc.card_id,
+        pc.original_filename,
+        pc.image_type,
+        pc.file_size,
+        pc.width,
+        pc.height,
+        pc.first_seen,
+        pc.last_updated,
+        cp.crop_paths,
+        cp.extraction_dir,
+        cp.grid_rows,
+        cp.grid_cols,
+        cp.ai_title,
+        cp.ai_description,
+        cp.ai_condition,
+        cp.ai_price,
+        cp.ai_model,
+        cp.last_processed,
+        el.status as ebay_status,
+        el.listing_url,
+        el.error_message,
+        sa.session_id,
+        sa.timestamp as session_time,
+        s.user_id,
+        u.username,
+        i.upload_path
+      FROM postal_cards pc
+      LEFT JOIN card_processing cp ON pc.card_id = cp.card_id
+      LEFT JOIN ebay_listings el ON pc.card_id = el.card_id
+      LEFT JOIN session_activity sa ON pc.card_id = sa.card_id AND sa.action = 'processed'
+      LEFT JOIN sessions s ON sa.session_id = s.session_id
+      LEFT JOIN users u ON s.user_id = u.user_id
+      LEFT JOIN (
+        SELECT file_hash, upload_path, upload_timestamp,
+               ROW_NUMBER() OVER (PARTITION BY file_hash ORDER BY upload_timestamp DESC) as rn
+        FROM images
+        WHERE upload_path NOT LIKE '%%Temp%%'
+      ) i ON pc.file_hash = i.file_hash AND i.rn = 1
+      WHERE cp.last_processed IS NOT NULL
+        %s
+        %s
+      ORDER BY pc.first_seen DESC
+    ", date_filter, ebay_filter)
+
+    result <- DBI::dbGetQuery(con, query)
+    return(result)
+
+  }, error = function(e) {
+    message("Error getting tracking data: ", e$message)
+    return(data.frame())
+  })
+}
+
+#' Get Session-Based Tracking Data
+#'
+#' Groups processed cards by session, showing one row per processing session
+#'
+#' @param date_filter SQL date filter clause
+#' @param ebay_filter SQL eBay status filter clause
+#' @return Data frame with one row per session
+#' @export
+get_session_tracking_data <- function(date_filter = "", ebay_filter = "") {
+  tryCatch({
+    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    on.exit(DBI::dbDisconnect(con), add = TRUE)
+
+    query <- sprintf("
+      SELECT
+        sa.session_id,
+        MIN(sa.timestamp) as session_time,
+        s.user_id,
+        u.username,
+        COUNT(DISTINCT pc.card_id) as cards_processed,
+        SUM(CASE WHEN pc.image_type = 'face' THEN 1 ELSE 0 END) as has_face,
+        SUM(CASE WHEN pc.image_type = 'verso' THEN 1 ELSE 0 END) as has_verso,
+        SUM(CASE WHEN pc.image_type = 'combined' THEN 1 ELSE 0 END) as has_combined,
+        SUM(CASE WHEN cp.ai_title IS NOT NULL THEN 1 ELSE 0 END) as ai_extractions,
+        SUM(CASE WHEN el.status IS NOT NULL THEN 1 ELSE 0 END) as ebay_posts,
+        MAX(el.status) as ebay_status
+      FROM session_activity sa
+      LEFT JOIN sessions s ON sa.session_id = s.session_id
+      LEFT JOIN users u ON s.user_id = u.user_id
+      LEFT JOIN postal_cards pc ON sa.card_id = pc.card_id
+      LEFT JOIN card_processing cp ON pc.card_id = cp.card_id
+      LEFT JOIN ebay_listings el ON pc.card_id = el.card_id
+      WHERE sa.action IN ('processed', 'images_combined')
+        AND cp.last_processed IS NOT NULL
+        %s
+        %s
+      GROUP BY sa.session_id, s.user_id, u.username
+      ORDER BY MIN(sa.timestamp) DESC
+    ", date_filter, ebay_filter)
+
+    result <- DBI::dbGetQuery(con, query)
+    return(result)
+
+  }, error = function(e) {
+    message("Error getting session tracking data: ", e$message)
+    return(data.frame())
+  })
+}
+
+#' Get All Cards for a Session
+#'
+#' Retrieves all processed cards for a specific session with images and AI data
+#'
+#' @param session_id Session ID to retrieve cards for
+#' @return Data frame with all cards in the session
+#' @export
+get_session_cards <- function(session_id) {
+  tryCatch({
+    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    on.exit(DBI::dbDisconnect(con), add = TRUE)
+
+    query <- "
+      SELECT
+        pc.card_id,
+        pc.original_filename,
+        pc.image_type,
+        pc.file_size,
+        pc.width,
+        pc.height,
+        cp.crop_paths,
+        cp.grid_rows,
+        cp.grid_cols,
+        cp.ai_title,
+        cp.ai_description,
+        cp.ai_condition,
+        cp.ai_price,
+        cp.ai_model,
+        cp.last_processed,
+        el.status as ebay_status,
+        el.listing_url,
+        el.error_message,
+        i.upload_path
+      FROM session_activity sa
+      LEFT JOIN postal_cards pc ON sa.card_id = pc.card_id
+      LEFT JOIN card_processing cp ON pc.card_id = cp.card_id
+      LEFT JOIN ebay_listings el ON pc.card_id = el.card_id
+      LEFT JOIN (
+        SELECT file_hash, upload_path, upload_timestamp,
+               ROW_NUMBER() OVER (PARTITION BY file_hash ORDER BY upload_timestamp DESC) as rn
+        FROM images
+        WHERE upload_path NOT LIKE '%Temp%'
+      ) i ON pc.file_hash = i.file_hash AND i.rn = 1
+      WHERE sa.session_id = ?
+        AND sa.action IN ('processed', 'images_combined')
+      ORDER BY 
+        CASE pc.image_type
+          WHEN 'face' THEN 1
+          WHEN 'verso' THEN 2
+          WHEN 'combined' THEN 3
+          ELSE 4
+        END
+    "
+
+    result <- DBI::dbGetQuery(con, query, params = list(session_id))
+    return(result)
+
+  }, error = function(e) {
+    message("Error getting session cards: ", e$message)
+    return(data.frame())
+  })
+}
+
+#' Format eBay status for display
+#'
+#' @description Convert eBay status to HTML badge
+#'
+#' @param status eBay status string
+#' @return HTML span with badge styling
+#' @export
+format_ebay_status <- function(status) {
+  if (is.na(status) || is.null(status) || status == "") {
+    return('<span class="badge bg-secondary">Not Posted</span>')
+  }
+
+  badge_class <- switch(tolower(status),
+    "listed" = "bg-success",
+    "draft" = "bg-warning",
+    "failed" = "bg-danger",
+    "pending" = "bg-info",
+    "bg-secondary"  # Fallback
+  )
+
+  sprintf('<span class="badge %s">%s</span>', badge_class, tools::toTitleCase(status))
+}

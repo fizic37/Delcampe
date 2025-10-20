@@ -1,32 +1,60 @@
 #' eBay Integration Functions
 #' Main orchestration for creating eBay listings from Delcampe data
 
-#' Create eBay listing from card data
+#' Create eBay Listing from Postal Card
 #'
-#' Complete flow: location → inventory item → offer → publish
+#' Creates a complete eBay listing by uploading image, creating inventory item, offer, and publishing.
+#' Complete flow: image upload → location → inventory item → offer → publish
 #'
-#' @param card_id Card ID from postal_cards table
-#' @param ai_data List with title, description, price, condition
-#' @param ebay_api eBay API object from init_ebay_api()
-#' @param session_id Shiny session ID for tracking
-#' @param image_url Image URL for listing (temporary placeholder OK for sandbox)
-#'
-#' @return List with success, listing_id, listing_url, or error
+#' @param card_id Postal card ID from database
+#' @param ai_data List containing AI-extracted data (title, description, price, condition)
+#' @param ebay_api EbayAPI instance with authenticated connection
+#' @param session_id Current processing session ID
+#' @param image_url Either a public HTTPS URL or local file path to image. If local path, will be uploaded to eBay Picture Services.
+#' @param ebay_user_id eBay user ID from account manager
+#' @param ebay_username eBay username for tracking
+#' @return List with success status, listing_id, offer_id, sku, listing_url
 #' @export
-create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id, image_url = NULL) {
+create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id, image_url = NULL, ebay_user_id = NULL, ebay_username = NULL) {
 
   cat("\n=== CREATING EBAY LISTING ===\n")
   cat("   Card ID:", card_id, "\n")
   cat("   Session:", session_id, "\n")
+  cat("   eBay User ID:", ebay_user_id %||% "None", "\n")
+  cat("   eBay Username:", ebay_username %||% "None", "\n")
+
+  # Step 0: Upload image to eBay Picture Services if local path provided
+  if (is.null(image_url)) {
+    # For now, use placeholder - in production, this should receive image_path
+    image_url <- "https://via.placeholder.com/500x350.png?text=Postcard"
+    cat("   Using placeholder image\n")
+  } else if (file.exists(image_url)) {
+    # image_url is actually a local file path - upload it
+    cat("\n0. Uploading image to eBay Picture Services...\n")
+    cat("   Local path:", image_url, "\n")
+    cat("   Environment:", ebay_api$config$environment, "\n")
+
+    upload_result <- ebay_api$media$upload_image(image_url)
+
+    if (!upload_result$success) {
+      error_msg <- paste("Failed to upload image:", upload_result$error)
+      cat("   ❌", error_msg, "\n")
+
+      # FALLBACK: Use placeholder image if upload fails
+      cat("   ⚠️ Falling back to placeholder image for now\n")
+      image_url <- "https://via.placeholder.com/500x350.png?text=Postcard+Image+Upload+Failed"
+      cat("   ℹ️ Listing will be created but without your actual image\n")
+      cat("   ℹ️ Try testing in sandbox first or check eBay API status\n")
+    } else {
+      image_url <- upload_result$image_url
+      cat("   ✅ Image uploaded, EPS URL:", image_url, "\n")
+      cat("   Image ID:", upload_result$image_id, "\n")
+      cat("   Expires:", upload_result$expiration, "\n")
+    }
+  }
 
   # Step 1: Validate required fields
   cat("\n1. Validating required fields...\n")
-
-  # Use placeholder image if none provided (for sandbox testing)
-  if (is.null(image_url)) {
-    image_url <- "https://via.placeholder.com/500x350.png?text=Postcard"
-    cat("   Using placeholder image\n")
-  }
 
   validation <- validate_required_fields(ai_data, image_url)
   if (!validation$valid) {
@@ -35,33 +63,61 @@ create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id
   }
   cat("   ✅ All required fields present\n")
 
-  # Step 2: Check/create location (one-time setup)
-  cat("\n2. Checking inventory location...\n")
-  location_key <- "default_location"
+  # Step 2: Get inventory location (auto-detect from eBay account)
+  cat("\n2. Detecting inventory location...\n")
 
-  # For simplicity, assume location exists or create on first run
-  # In production, would check if location exists first
-  # NOTE: Using US for sandbox testing - update for production
-  location_result <- tryCatch({
-    ebay_api$inventory$create_location(
-      merchant_location_key = location_key,
-      location_data = list(
-        location = list(
-          address = list(
-            country = "US",
-            postalCode = "10001"
-          )
-        ),
-        name = "Primary Location",
-        locationTypes = list("WAREHOUSE")
-      )
+  # Try to get existing locations from eBay
+  existing_locations_result <- ebay_api$inventory$get_locations()
+
+  location_key <- NULL
+
+  if (existing_locations_result$success &&
+      !is.null(existing_locations_result$locations) &&
+      length(existing_locations_result$locations) > 0) {
+
+    # Use first available location (eBay account already configured)
+    first_location <- existing_locations_result$locations[[1]]
+    location_key <- first_location$merchantLocationKey
+    location_country <- first_location$location$address$country %||% "N/A"
+
+    cat("   ✅ Using eBay inventory location:", location_key, "\n")
+    cat("      Address:", first_location$location$address$addressLine1 %||% "N/A", "\n")
+    cat("      City:", first_location$location$address$city %||% "N/A", "\n")
+    cat("      Country:", location_country, "\n")
+
+    # Get registration address to compare (helps diagnose Error 25019)
+    cat("   Checking account registration address...\n")
+    reg_result <- ebay_api$inventory$get_registration_address()
+
+    if (reg_result$success) {
+      reg_country <- reg_result$country %||% "N/A"
+      cat("   📋 eBay account registered in:", reg_country, "\n")
+
+      # Warn if mismatch (causes Error 25019)
+      if (!is.na(reg_country) && !is.na(location_country) && reg_country != location_country) {
+        cat("   ⚠️ WARNING: Location country (", location_country, ") ≠ Registration country (", reg_country, ")\n")
+        cat("   ⚠️ This will cause Error 25019 (Overseas Warehouse Block Policy)\n")
+        cat("   ⚠️ You need to either:\n")
+        cat("      1. Update inventory location to match registration (", reg_country, ") at: https://www.ebay.com/sh/ovw\n")
+        cat("      2. Or apply for overseas warehouse authorization: whappeals@ebay.com\n")
+      } else {
+        cat("   ✅ Location and registration countries match\n")
+      }
+    }
+
+  } else {
+    # No locations exist - account needs setup via eBay Seller Hub
+    error_msg <- paste0(
+      "No inventory locations found in your eBay account. ",
+      "Please set up at least one location in eBay Seller Hub first:\n",
+      "   1. Go to: https://www.ebay.com/sh/ovw\n",
+      "   2. Navigate to: Business > Locations\n",
+      "   3. Add your inventory location\n",
+      "   4. Then try creating listings again"
     )
-  }, error = function(e) {
-    # Location might already exist, that's OK
-    list(success = TRUE)
-  })
-
-  cat("   ✅ Location ready:", location_key, "\n")
+    cat("   ❌", error_msg, "\n")
+    return(list(success = FALSE, error = error_msg))
+  }
 
   # Step 3: Create inventory item
   cat("\n3. Creating inventory item...\n")
@@ -138,7 +194,7 @@ create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id
       sku = sku,
       marketplaceId = "EBAY_US",
       format = "FIXED_PRICE",
-      categoryId = "914",
+      categoryId = "262042",  # Topographical Postcards (correct 2024 category)
       merchantLocationKey = location_key,
       availableQuantity = 1,
       listingDescription = ai_data$description,
@@ -161,7 +217,7 @@ create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id
       sku = sku,
       marketplaceId = "EBAY_US",
       format = "FIXED_PRICE",
-      categoryId = "914",
+      categoryId = "262042",  # Topographical Postcards (correct 2024 category)
       pricingSummary = list(
         price = list(
           currency = "USD",
@@ -178,7 +234,7 @@ create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id
   }
 
   cat("   Price:", offer_data$pricingSummary$price$value, "USD\n")
-  cat("   Category: 914 (Postcards)\n")
+  cat("   Category: 262042 (Topographical Postcards)\n")
   cat("   Calling API: POST /offer\n")
 
   offer_result <- ebay_api$inventory$create_offer(offer_data)
@@ -199,6 +255,18 @@ create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id
   if (!publish_result$success) {
     error_msg <- paste("Failed to publish offer:", publish_result$error)
     cat("   ❌", error_msg, "\n")
+    
+    # Check for Error 25019 (Overseas Warehouse Block)
+    if (grepl("25019", error_msg)) {
+      cat("   ℹ️ eBay Error 25019: Overseas Warehouse Block Policy\n")
+      cat("   ℹ️ Your eBay account's inventory location doesn't match your registration address.\n")
+      cat("   ℹ️ To fix this, you need to:\n")
+      cat("      1. Go to eBay Seller Hub: https://www.ebay.com/sh/ovw\n")
+      cat("      2. Update your inventory location to match your registered address\n")
+      cat("      3. Or apply for overseas warehouse authorization: whappeals@ebay.com\n")
+      cat("      4. See: https://export.ebay.com/en/tc/overseas-warehouse-block-policy\n")
+    }
+    
     return(list(success = FALSE, error = error_msg))
   }
   cat("   ✅ Offer published, listing ID:", publish_result$listing_id, "\n")
@@ -218,7 +286,9 @@ create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id
     price = ai_data$price,
     condition = inventory_data$condition,
     aspects = inventory_data$product$aspects,
-    environment = ebay_api$config$environment
+    environment = ebay_api$config$environment,
+    ebay_user_id = ebay_user_id,
+    ebay_username = ebay_username
   )
 
   if (!save_success) {

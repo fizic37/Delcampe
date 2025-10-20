@@ -29,17 +29,6 @@ def detect_rows_by_contour(image, min_area_frac=0.03):
         x, y, w, h = cv2.boundingRect(cnt)
         boxes.append((y, y + h))  # (top, bottom)
 
-    # Optional: Save debug image
-    debug_img = image.copy()
-    for y1, y2 in boxes:
-        cv2.rectangle(debug_img, (0, y1), (image.shape[1], y2), (0, 0, 255), 3)
-    
-    try:
-        cv2.imwrite("debug_detected_boxes.jpg", debug_img)
-        print("PYTHON DEBUG: Saved debug image: debug_detected_boxes.jpg")
-    except:
-        print("PYTHON DEBUG: Could not save debug image")
-
     # Return only the boundary positions (both top and bottom of each box)
     boundaries = [y for y, _ in boxes] + [b for _, b in boxes]
     return boundaries

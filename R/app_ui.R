@@ -101,21 +101,21 @@ app_ui <- function(request) {
         )
       ),
 
-      # Settings Tab with Tracking Integration
+      # Settings Tab
       bslib::nav_panel(
         "Settings",
         icon = icon("cog"),
-        
-        # Settings content with integrated tracking
+
+        # Settings content
         bslib::navset_card_tab(
           bslib::nav_panel(
             title = "General",
             mod_settings_ui("settings")
           ),
           bslib::nav_panel(
-            title = "Tracking",
-            # Tracking module integrated into settings
-            mod_tracking_viewer_ui("tracking_viewer_1")
+            title = "eBay Connection",
+            icon = icon("shopping-cart"),
+            mod_ebay_auth_ui("ebay_auth")
           )
         )
       ),

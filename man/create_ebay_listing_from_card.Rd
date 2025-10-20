@@ -4,30 +4,37 @@
 \alias{create_ebay_listing_from_card}
 \title{eBay Integration Functions
 Main orchestration for creating eBay listings from Delcampe data
-Create eBay listing from card data}
+Create eBay Listing from Postal Card}
 \usage{
 create_ebay_listing_from_card(
   card_id,
   ai_data,
   ebay_api,
   session_id,
-  image_url = NULL
+  image_url = NULL,
+  ebay_user_id = NULL,
+  ebay_username = NULL
 )
 }
 \arguments{
-\item{card_id}{Card ID from postal_cards table}
+\item{card_id}{Postal card ID from database}
 
-\item{ai_data}{List with title, description, price, condition}
+\item{ai_data}{List containing AI-extracted data (title, description, price, condition)}
 
-\item{ebay_api}{eBay API object from init_ebay_api()}
+\item{ebay_api}{EbayAPI instance with authenticated connection}
 
-\item{session_id}{Shiny session ID for tracking}
+\item{session_id}{Current processing session ID}
 
-\item{image_url}{Image URL for listing (temporary placeholder OK for sandbox)}
+\item{image_url}{Either a public HTTPS URL or local file path to image. If local path, will be uploaded to eBay Picture Services.}
+
+\item{ebay_user_id}{eBay user ID from account manager}
+
+\item{ebay_username}{eBay username for tracking}
 }
 \value{
-List with success, listing_id, listing_url, or error
+List with success status, listing_id, offer_id, sku, listing_url
 }
 \description{
-Complete flow: location → inventory item → offer → publish
+Creates a complete eBay listing by uploading image, creating inventory item, offer, and publishing.
+Complete flow: image upload → location → inventory item → offer → publish
 }

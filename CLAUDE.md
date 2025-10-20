@@ -53,6 +53,17 @@
 
 ### Development Standards
 
+#### Shiny API Critical Rules
+- **CRITICAL - showNotification() ONLY accepts these type values:**
+  - `type = "message"` (default, blue/info style)
+  - `type = "warning"` (yellow style)
+  - `type = "error"` (red style)
+  - **NEVER use `type = "default"`** - this will cause an error!
+  - **NEVER use `type = "success"`** - this will cause an error!
+  - **DO NOT confuse with JavaScript notification libraries** (Bootstrap, Toastr, etc.) which have different type values
+  - This is R Shiny's `showNotification()`, NOT a JavaScript function
+  - When in doubt, omit the `type` parameter entirely (defaults to "message")
+
 #### Library Usage Hierarchy
 - **First Priority**: Use base Shiny functions when functionality is available
 - **Second Priority**: Use bslib components for enhanced UI/styling needs

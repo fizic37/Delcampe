@@ -4,24 +4,27 @@
 #' Map AI condition strings to eBay condition codes
 #' @export
 map_condition_to_ebay <- function(condition) {
-  # AI extraction uses: "excellent", "good", "fair", "poor", "used"
+  # Category 262042 (Topographical Postcards) ONLY accepts NEW condition
+  # All other conditions (LIKE_NEW, USED_*, etc.) are rejected
+  # This is eBay's restriction for this category - all postcards must be listed as NEW
+  # Note: You can describe actual condition in the description text
   condition_map <- list(
-    "excellent" = "USED_EXCELLENT",
-    "very good" = "USED_VERY_GOOD",
-    "good" = "USED_GOOD",
-    "fair" = "USED_ACCEPTABLE",
-    "poor" = "USED_ACCEPTABLE",
-    "used" = "USED_GOOD",  # Default used condition
+    "excellent" = "NEW",
+    "very good" = "NEW",
+    "good" = "NEW",
+    "fair" = "NEW",
+    "poor" = "NEW",
+    "used" = "NEW",
     "new" = "NEW",
-    "like new" = "LIKE_NEW"
+    "like new" = "NEW"
   )
 
   condition_lower <- tolower(trimws(condition))
   ebay_condition <- condition_map[[condition_lower]]
 
   if (is.null(ebay_condition)) {
-    warning("Unknown condition '", condition, "', defaulting to USED_GOOD")
-    return("USED_GOOD")
+    warning("Unknown condition '", condition, "', defaulting to NEW")
+    return("NEW")
   }
 
   return(ebay_condition)

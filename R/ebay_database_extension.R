@@ -57,7 +57,8 @@ initialize_ebay_tables <- function(db_path = "inst/app/data/tracking.sqlite") {
 save_ebay_listing <- function(card_id, session_id, ebay_item_id = NULL, 
                               ebay_offer_id = NULL, sku, status = "draft",
                               title = NULL, description = NULL, price = NULL,
-                              condition = NULL, aspects = NULL, environment = "sandbox") {
+                              condition = NULL, aspects = NULL, environment = "sandbox",
+                              ebay_user_id = NULL, ebay_username = NULL) {
   tryCatch({
     con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
     on.exit(DBI::dbDisconnect(con))
@@ -80,12 +81,14 @@ save_ebay_listing <- function(card_id, session_id, ebay_item_id = NULL,
         UPDATE ebay_listings 
         SET ebay_item_id = ?, ebay_offer_id = ?, status = ?,
             title = ?, description = ?, price = ?, condition = ?,
-            aspects = ?, last_updated = CURRENT_TIMESTAMP,
+            aspects = ?, ebay_user_id = ?, ebay_username = ?,
+            last_updated = CURRENT_TIMESTAMP,
             listed_at = CASE WHEN ? = 'listed' THEN CURRENT_TIMESTAMP ELSE listed_at END
         WHERE sku = ?
       ", list(ebay_item_id, ebay_offer_id, status,
               title, description, price, condition,
-              aspects_json, status, sku))
+              aspects_json, ebay_user_id, ebay_username,
+              status, sku))
       
       message("Updated eBay listing: ", sku)
     } else {
@@ -94,12 +97,12 @@ save_ebay_listing <- function(card_id, session_id, ebay_item_id = NULL,
         INSERT INTO ebay_listings (
           card_id, session_id, ebay_item_id, ebay_offer_id, sku, 
           status, environment, title, description, price, 
-          condition, aspects, listed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          condition, aspects, ebay_user_id, ebay_username, listed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
           CASE WHEN ? = 'listed' THEN CURRENT_TIMESTAMP ELSE NULL END)
       ", list(card_id, session_id, ebay_item_id, ebay_offer_id, sku,
               status, environment, title, description, price,
-              condition, aspects_json, status))
+              condition, aspects_json, ebay_user_id, ebay_username, status))
       
       message("Created eBay listing: ", sku)
     }

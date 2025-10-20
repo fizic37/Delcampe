@@ -16,7 +16,9 @@ save_ebay_listing(
   price = NULL,
   condition = NULL,
   aspects = NULL,
-  environment = "sandbox"
+  environment = "sandbox",
+  ebay_user_id = NULL,
+  ebay_username = NULL
 )
 }
 \description{

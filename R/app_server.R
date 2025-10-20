@@ -5,6 +5,20 @@
 #' @import shiny
 #' @noRd
 app_server <- function(input, output, session) {
+  # ==== GLOBAL ERROR HANDLER FOR PRODUCTION LOGGING ====
+  # Catches all unhandled Shiny errors and logs to stderr for shinyapps.io visibility
+  options(shiny.error = function() {
+    cat(file = stderr(),
+        "\n========================================\n",
+        "SHINY ERROR DETECTED\n",
+        "========================================\n",
+        "Time: ", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n",
+        "Session: ", session$token, "\n",
+        "Error: ", geterrmessage(), "\n",
+        "========================================\n\n",
+        sep = "")
+  })
+
   # ==== INITIALIZE TRACKING DATABASE ====
   cat("
 📊 Initializing tracking database...
@@ -18,8 +32,7 @@ app_server <- function(input, output, session) {
   })
   
   if (db_initialized) {
-    cat("✅ Tracking database ready
-")
+    cat("✅ Tracking database ready\n")
     # Start session tracking
     tryCatch({
       start_processing_session(
@@ -27,13 +40,9 @@ app_server <- function(input, output, session) {
         user_id = "default_user",
         session_type = "postal_cards"
       )
-      cat("✅ Session tracking started:", session$token, "
-
-")
+      cat("✅ Session started:", session$token, "\n")
     }, error = function(e) {
-      cat("⚠️ Failed to start session tracking:", e$message, "
-
-")
+      cat("⚠️ Failed to start session tracking:", e$message, "\n")
     })
   }
   
@@ -132,6 +141,7 @@ app_server <- function(input, output, session) {
     lot_paths = NULL,
     combined_paths = NULL,
     combined_image_paths = NULL, # For displaying combined images
+    combined_file_paths = NULL, # Actual file system paths for combined images (for AI extraction)
     
     # Grid configuration (shared between face/verso)
     num_rows = NULL,
@@ -139,32 +149,36 @@ app_server <- function(input, output, session) {
     
     # Upload tracking for state management
     last_face_upload_time = NULL,
-    last_verso_upload_time = NULL
+    last_verso_upload_time = NULL,
+    
+    # Track extraction source (for auto-combine logic)
+    face_used_existing = FALSE,
+    verso_used_existing = FALSE
   )
 
-  # Session directory for combined images
-  session_temp_dir <- reactive({
-    temp_dir <- tempfile("shiny_combined_images_")
-    dir.create(temp_dir, showWarnings = FALSE, recursive = TRUE)
-    temp_dir
-  })
+  # Session directory for combined images - CREATE ONCE, not reactive!
+  session_temp_dir_path <- tempfile("shiny_combined_images_")
+  dir.create(session_temp_dir_path, showWarnings = FALSE, recursive = TRUE)
 
-  # Resource prefix for combined images
-  observe({
-    resource_prefix_combined <- "combined_session_images"
-    shiny::addResourcePath(prefix = resource_prefix_combined, directoryPath = session_temp_dir())
-  })
+  # Helper function to get the session temp dir
+  session_temp_dir <- function() {
+    return(session_temp_dir_path)
+  }
+
+  # Resource prefix for combined images - register ONCE at startup
+  resource_prefix_combined <- "combined_session_images"
+  shiny::addResourcePath(prefix = resource_prefix_combined, directoryPath = session_temp_dir_path)
 
   # Face processor module with callbacks
-  cat("\n🔵 ABOUT TO CALL FACE MODULE\n")
   face_server_return <- tryCatch({
     mod_postal_card_processor_server(
       "face_processor",
       card_type = "face",
-      on_extraction_complete = function(count, dir) {
+      on_extraction_complete = function(count, dir, used_existing = FALSE) {
         app_rv$face_extraction_complete <- TRUE
         app_rv$face_extracted_count <- count
         app_rv$face_extraction_dir <- dir
+        app_rv$face_used_existing <- used_existing
       },
       on_grid_update = function(rows, cols) {
         app_rv$num_rows <- rows
@@ -181,6 +195,7 @@ app_server <- function(input, output, session) {
         # Reset face extraction for THIS upload
         app_rv$face_extraction_complete <- FALSE
         app_rv$face_extracted_count <- 0
+        app_rv$face_used_existing <- FALSE
       }
     )
   }, error = function(e) {
@@ -189,17 +204,15 @@ app_server <- function(input, output, session) {
     NULL
   })
 
-  cat("🔵 FACE MODULE CALL COMPLETED\n\n")
-  
   # Verso processor module with callbacks
-  cat("\n🟢 ABOUT TO CALL VERSO MODULE\n")
   verso_server_return <- mod_postal_card_processor_server(
     "verso_processor", 
     card_type = "verso",
-    on_extraction_complete = function(count, dir) {
+    on_extraction_complete = function(count, dir, used_existing = FALSE) {
       app_rv$verso_extraction_complete <- TRUE
       app_rv$verso_extracted_count <- count
       app_rv$verso_extraction_dir <- dir
+      app_rv$verso_used_existing <- used_existing
     },
     on_grid_update = function(rows, cols) {
       # Verso can also update grid if needed
@@ -219,6 +232,7 @@ app_server <- function(input, output, session) {
       # Reset verso extraction for THIS upload
       app_rv$verso_extraction_complete <- FALSE
       app_rv$verso_extracted_count <- 0
+      app_rv$verso_used_existing <- FALSE
     }
   )
 
@@ -227,6 +241,11 @@ app_server <- function(input, output, session) {
   
   # Tracking viewer server
   mod_tracking_viewer_server("tracking_viewer_1")
+
+  # eBay authentication server - returns list with api and account_manager
+  ebay_auth <- mod_ebay_auth_server("ebay_auth")
+  ebay_api <- ebay_auth$api
+  ebay_account_manager <- ebay_auth$account_manager
 
   # Update grid info from active modules (SINGLE observer per module, no duplicates)
   observe({
@@ -245,25 +264,11 @@ app_server <- function(input, output, session) {
 
   # FIXED: Smart combined image output display - shows button OR results at top
   output$combined_image_output_display <- renderUI({
-    cat("\n" , rep("=", 80), "\n")
-    cat("⚡ RENDER TRIGGERED FOR combined_image_output_display\n")
-    cat(rep("=", 80), "\n\n")
-    
     # Show "Start Over" button if any processing has been done
     show_reset_button <- app_rv$face_image_uploaded || app_rv$verso_image_uploaded
-    
-    # DEBUG: Log button visibility state
-    cat("📑 State Variables:\n")
-    cat("   face_image_uploaded:", app_rv$face_image_uploaded, "\n")
-    cat("   verso_image_uploaded:", app_rv$verso_image_uploaded, "\n")
-    cat("   show_reset_button:", show_reset_button, "\n")
-    cat("   face_extraction_complete:", app_rv$face_extraction_complete, "\n")
-    cat("   verso_extraction_complete:", app_rv$verso_extraction_complete, "\n")
-    cat("   images_processed:", app_rv$images_processed, "\n\n")
-    
+
     # State 1: Nothing uploaded yet OR images uploaded but not extracted
     if (!app_rv$face_extraction_complete || !app_rv$verso_extraction_complete) {
-      cat("🔵 Rendering STATE 1: Not all extracted\n\n")
       bslib::card(
         header = bslib::card_header(
           div(
@@ -303,40 +308,222 @@ app_server <- function(input, output, session) {
           )
         )
       )
-    } 
-    # State 2: Both extractions complete, ready to combine
+    }
+    # State 2: Both extractions complete - decide auto vs manual
     else if (app_rv$face_extraction_complete && app_rv$verso_extraction_complete && !app_rv$images_processed) {
-      cat("🟢 Rendering STATE 2: Ready to combine\n\n")
+
+      # Check if BOTH used existing (Task 09: auto-combine only in this case)
+      both_used_existing <- app_rv$face_used_existing && app_rv$verso_used_existing
+
+      if (both_used_existing) {
+        # AUTO-COMBINE: Both used existing crops
+      
+      # Automatically trigger processing when both extractions are complete
+      # This runs once per reactive cycle, then images_processed becomes TRUE
+      isolate({
+        tryCatch({
+          # Check if Python is available
+          if (!exists("combine_face_verso_images", envir = .GlobalEnv)) {
+            showNotification("Python functions not available. Please restart the app.", type = "error")
+            return(NULL)
+          }
+          
+          # Save combined images directly to session temp dir (no subdirectory)
+          # This ensures web resource path matches file system location
+          combined_output_dir <- session_temp_dir()
+          
+          # Get grid dimensions
+          num_rows <- app_rv$num_rows %||% 1
+          num_cols <- app_rv$num_cols %||% 1
+          
+          cat("
+🎨 AUTO-PROCESSING COMBINED IMAGES:
+")
+          cat("   Face dir:", app_rv$face_extraction_dir, "
+")
+          cat("   Verso dir:", app_rv$verso_extraction_dir, "
+")
+          cat("   Output dir:", combined_output_dir, "
+")
+          cat("   Grid:", num_rows, "x", num_cols, "
+")
+          
+          # Call Python function to combine images
+          py_results <- combine_face_verso_images(
+            face_dir = app_rv$face_extraction_dir,
+            verso_dir = app_rv$verso_extraction_dir,
+            output_dir = combined_output_dir,
+            num_rows = as.integer(num_rows),
+            num_cols = as.integer(num_cols)
+          )
+          
+          cat("   Python results:
+")
+          cat("     Lot paths:", length(py_results$lot_paths), "
+")
+          cat("     Combined paths:", length(py_results$combined_paths), "
+")
+          
+          if (!is.null(py_results$lot_paths) && length(py_results$lot_paths) > 0) {
+            # Convert file paths to web URLs
+            abs_lot_paths <- normalizePath(unlist(py_results$lot_paths), winslash = "/")
+            abs_combined_paths <- normalizePath(unlist(py_results$combined_paths), winslash = "/")
+            abs_session_dir <- normalizePath(session_temp_dir(), winslash = "/")
+            
+            rel_lot_paths <- sub(paste0("^", gsub("/", "\\/", abs_session_dir), "/*"), "", abs_lot_paths)
+            rel_combined_paths <- sub(paste0("^", gsub("/", "\\/", abs_session_dir), "/*"), "", abs_combined_paths)
+            
+            rel_lot_paths <- sub("^/*", "", rel_lot_paths)
+            rel_combined_paths <- sub("^/*", "", rel_combined_paths)
+            
+            # Create web URLs
+            app_rv$lot_paths <- paste("combined_session_images", rel_lot_paths, sep = "/")
+            app_rv$combined_paths <- paste("combined_session_images", rel_combined_paths, sep = "/")
+            app_rv$combined_image_paths <- app_rv$combined_paths
+
+            # Store actual file system paths for AI extraction
+            app_rv$combined_file_paths <- abs_combined_paths
+
+            app_rv$images_processed <- TRUE
+
+            # Track combined images in database
+            tryCatch({
+              # For each combined image, create a card entry
+              combined_card_ids <- list()
+              for (i in seq_along(abs_combined_paths)) {
+                combined_path <- abs_combined_paths[i]
+
+                # Calculate hash for combined image
+                combined_hash <- calculate_image_hash(combined_path)
+
+                if (!is.null(combined_hash)) {
+                  # Create card entry for combined image
+                  card_id <- get_or_create_card(
+                    file_hash = combined_hash,
+                    image_type = "combined",
+                    original_filename = basename(combined_path),
+                    file_size = file.info(combined_path)$size
+                  )
+
+                  combined_card_ids[[i]] <- card_id
+
+                  # Save processing details (no crops, but track grid info)
+                  save_card_processing(
+                    card_id = card_id,
+                    crop_paths = NULL,
+                    h_boundaries = NULL,
+                    v_boundaries = NULL,
+                    grid_rows = as.integer(num_rows),
+                    grid_cols = as.integer(num_cols),
+                    extraction_dir = as.character(combined_output_dir),
+                    ai_data = NULL
+                  )
+
+                  # Track session activity
+                  track_session_activity(
+                    session_id = session$token,
+                    card_id = card_id,
+                    action = "images_combined",
+                    details = list(
+                      combined_index = i,
+                      combined_path = combined_path,
+                      grid = paste0(num_rows, "x", num_cols),
+                      auto_combined = TRUE
+                    )
+                  )
+                }
+              }
+
+              # Store combined card IDs for AI extraction
+              app_rv$combined_card_ids <- combined_card_ids
+
+              message("✅ Combined images tracked in database: ", length(combined_card_ids), " cards")
+            }, error = function(e) {
+              message("⚠️ Failed to track combined images: ", e$message)
+            })
+
+            cat("✅ Auto-processing complete!
+
+")
+
+            # NOTE: AI extraction removed - was causing long waits without user consent
+            # TODO: Add opt-in "Extract with AI" button if needed
+
+          } else {
+            showNotification("No images were generated. Check the console for details.", type = "warning")
+          }
+          
+        }, error = function(e) {
+          cat("❌ ERROR in auto-processing:
+")
+          cat("   Message:", e$message, "
+")
+          cat("   Call:", deparse(e$call), "
+")
+          showNotification(paste("Processing failed:", e$message), type = "error")
+        })
+      })
+      
+      # Show processing indicator while waiting
       bslib::card(
         header = bslib::card_header(
-          "Ready to Combine Images",
+          "Processing Combined Images...",
           style = "background-color: #28a745; color: white;"
         ),
         class = "combined-output-card compact-status-card",
         div(
-          style = "padding: 15px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;",
+          style = "padding: 20px; text-align: center;",
           div(
-            style = "flex: 1; min-width: 200px;",
-            h5("🎯 Both sides processed!", style = "color: #28a745; margin: 0 0 5px 0;"),
-            p(paste(app_rv$face_extracted_count, "face +", 
-                   app_rv$verso_extracted_count, "verso images"), 
-              style = "margin: 0; font-size: 14px; color: #666;")
+            style = "display: inline-block; width: 40px; height: 40px; border: 4px solid #f3f3f3; border-radius: 50%; border-top: 4px solid #28a745; animation: spin 1s linear infinite;",
+            tags$style(HTML("@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }"))
           ),
-          actionButton(
-            inputId = "process_combined",
-            label = "Process Combined Images",
-            icon = icon("wand-magic-sparkles"),
-            class = "btn-lg btn-success",
-            style = "background: linear-gradient(135deg, #52B788 0%, #40916C 100%); border: none; color: white; padding: 15px 40px; border-radius: 12px; font-weight: 700; font-size: 18px; box-shadow: 0 4px 15px rgba(82, 183, 136, 0.4); transition: all 0.3s ease; cursor: pointer;"
+          p(
+            paste(app_rv$face_extracted_count, "face +", 
+                 app_rv$verso_extracted_count, "verso images"), 
+            style = "margin-top: 15px; font-size: 14px; color: #666;"
           )
         )
       )
-    } 
+      } else {
+        # MANUAL BUTTON: One or both extracted normally
+        bslib::card(
+          header = bslib::card_header(
+            div(
+              style = "display: flex; justify-content: space-between; align-items: center;",
+              span("Ready to Combine Images"),
+              actionButton(
+                inputId = "start_over",
+                label = "Start Over",
+                icon = icon("redo"),
+                class = "btn-sm btn-outline-light",
+                style = "border-color: white; color: white;"
+              )
+            ),
+            style = "background-color: #28a745; color: white;"
+          ),
+          class = "combined-output-card compact-status-card",
+          div(
+            style = "padding: 15px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;",
+            div(
+              style = "flex: 1; min-width: 200px;",
+              h5("🎯 Both sides processed!", style = "color: #28a745; margin: 0 0 5px 0;"),
+              p(paste(app_rv$face_extracted_count, "face +",
+                     app_rv$verso_extracted_count, "verso images"),
+                style = "margin: 0; font-size: 14px; color: #666;")
+            ),
+            actionButton(
+              inputId = "process_combined",
+              label = "Combine Images",
+              icon = icon("wand-magic-sparkles"),
+              class = "btn-lg btn-success",
+              style = "background: linear-gradient(135deg, #52B788 0%, #40916C 100%); border: none; color: white; padding: 15px 40px; border-radius: 12px; font-weight: 700; font-size: 18px; box-shadow: 0 4px 15px rgba(82, 183, 136, 0.4); transition: all 0.3s ease; cursor: pointer;"
+            )
+          )
+        )
+      }
+    }
     # State 3: Images processed - show success message with Start Over button
     else if (app_rv$images_processed) {
-      cat("🟢 Rendering STATE 3: Processing complete\n\n")
-      
-      # SIMPLIFIED VERSION - Test if this renders at all
       div(
         style = "background-color: #d4edda; border: 2px solid #28a745; border-radius: 8px; padding: 20px; margin-bottom: 20px;",
         div(
@@ -378,21 +565,16 @@ app_server <- function(input, output, session) {
   
   # "Start Over" button - complete workflow reset for new upload session
   observeEvent(input$start_over, {
-    cat("\n🔄 START OVER INITIATED\n")
-    cat("   Timestamp:", format(Sys.time(), "%H:%M:%S"), "\n")
-    
     # Reset Face module
     if (!is.null(face_server_return) && !is.null(face_server_return$reset_module)) {
       face_server_return$reset_module()
-      cat("   ✅ Face module reset called\n")
     }
-    
-    # Reset Verso module  
+
+    # Reset Verso module
     if (!is.null(verso_server_return) && !is.null(verso_server_return$reset_module)) {
       verso_server_return$reset_module()
-      cat("   ✅ Verso module reset called\n")
     }
-    
+
     # Reset all app-level reactive values
     app_rv$face_grid_info <- NULL
     app_rv$verso_grid_info <- NULL
@@ -412,16 +594,12 @@ app_server <- function(input, output, session) {
     app_rv$num_cols <- NULL
     app_rv$last_face_upload_time <- NULL
     app_rv$last_verso_upload_time <- NULL
-    
-    cat("   ✅ App state reset\n")
-    
+
     showNotification(
       "🔄 Ready for new upload session. Upload Face and Verso images to begin.",
       type = "message",
       duration = 5
     )
-    
-    cat("   ✅ START OVER COMPLETE\n\n")
   })
 
   # Process combined images
@@ -435,9 +613,9 @@ app_server <- function(input, output, session) {
           return()
         }
         
-        # Create output directory for combined images
-        combined_output_dir <- file.path(session_temp_dir(), "combined_images")
-        dir.create(combined_output_dir, showWarnings = FALSE, recursive = TRUE)
+        # Save combined images directly to session temp dir (no subdirectory)
+        # This ensures web resource path matches file system location
+        combined_output_dir <- session_temp_dir()
         
         # Get grid dimensions
         num_rows <- app_rv$num_rows %||% 1
@@ -478,10 +656,71 @@ app_server <- function(input, output, session) {
           app_rv$lot_paths <- paste("combined_session_images", rel_lot_paths, sep = "/")
           app_rv$combined_paths <- paste("combined_session_images", rel_combined_paths, sep = "/")
           app_rv$combined_image_paths <- app_rv$combined_paths
-          
+
+          # Store actual file system paths for AI extraction
+          app_rv$combined_file_paths <- abs_combined_paths
+
           app_rv$images_processed <- TRUE
-          
-          # No success notification - user can see the export section appear
+
+          # Track combined images in database
+          tryCatch({
+            # For each combined image, create a card entry
+            combined_card_ids <- list()
+            for (i in seq_along(abs_combined_paths)) {
+              combined_path <- abs_combined_paths[i]
+
+              # Calculate hash for combined image
+              combined_hash <- calculate_image_hash(combined_path)
+
+              if (!is.null(combined_hash)) {
+                # Create card entry for combined image
+                card_id <- get_or_create_card(
+                  file_hash = combined_hash,
+                  image_type = "combined",
+                  original_filename = basename(combined_path),
+                  file_size = file.info(combined_path)$size
+                )
+
+                combined_card_ids[[i]] <- card_id
+
+                # Save processing details (no crops, but track grid info)
+                save_card_processing(
+                  card_id = card_id,
+                  crop_paths = NULL,
+                  h_boundaries = NULL,
+                  v_boundaries = NULL,
+                  grid_rows = as.integer(num_rows),
+                  grid_cols = as.integer(num_cols),
+                  extraction_dir = as.character(combined_output_dir),
+                  ai_data = NULL
+                )
+
+                # Track session activity
+                track_session_activity(
+                  session_id = session$token,
+                  card_id = card_id,
+                  action = "images_combined",
+                  details = list(
+                    combined_index = i,
+                    combined_path = combined_path,
+                    grid = paste0(num_rows, "x", num_cols)
+                  )
+                )
+              }
+            }
+
+            # Store combined card IDs for AI extraction
+            app_rv$combined_card_ids <- combined_card_ids
+
+            message("✅ Combined images tracked in database: ", length(combined_card_ids), " cards")
+          }, error = function(e) {
+            message("⚠️ Failed to track combined images: ", e$message)
+          })
+
+          cat("✅ Manual processing complete!\n\n")
+
+          # NOTE: AI extraction removed - was causing long waits without user consent
+          # TODO: Add opt-in "Extract with AI" button if needed
         } else {
           showNotification("No images were generated. Check the console for details.", type = "warning")
         }
@@ -530,12 +769,17 @@ app_server <- function(input, output, session) {
   mod_delcampe_export_server(
     "lot_export",
     image_paths = reactive(app_rv$lot_paths),
-    image_type = "lot"
+    image_type = "lot",
+    ebay_api = ebay_api,
+    ebay_account_manager = ebay_account_manager
   )
-  
+
   mod_delcampe_export_server(
-    "combined_export", 
+    "combined_export",
     image_paths = reactive(app_rv$combined_paths),
-    image_type = "combined"
+    image_file_paths = reactive(app_rv$combined_file_paths),
+    image_type = "combined",
+    ebay_api = ebay_api,
+    ebay_account_manager = ebay_account_manager
   )
 }
