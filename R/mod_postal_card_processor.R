@@ -173,13 +173,62 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       rv$current_image_hash <- NULL  # FIX: Clear hash for new upload
       rv$current_card_id <- NULL  # FIX: Clear card ID for new upload
       
-      # Save uploaded file
+      # Save uploaded file with verification
       timestamp <- format(Sys.time(), "%Y-%m-%d_%H-%M-%S")
       safe_filename <- paste0("uploaded_", card_type, "_", timestamp, ".jpg")
       upload_path <- file.path(session_temp_dir, safe_filename)
-      file.copy(file_info$datapath, upload_path)
+
+      # CRITICAL FIX: Verify file copy succeeded
+      copy_success <- file.copy(file_info$datapath, upload_path, overwrite = TRUE)
+      if (!copy_success) {
+        showNotification(
+          paste("Failed to save uploaded", card_type, "image. Please try again."),
+          type = "error",
+          duration = 5
+        )
+        return()
+      }
+
       rv$image_path_original <- upload_path
-      
+
+      # CRITICAL FIX: Wait for file to be readable (with retry logic)
+      # This prevents race conditions where browser tries to load before file is ready
+      max_wait <- 10  # iterations
+      wait_count <- 0
+      file_ready <- FALSE
+
+      while (wait_count < max_wait && !file_ready) {
+        if (file.exists(upload_path) && file.size(upload_path) > 0) {
+          # Additional check: try to read first few bytes to ensure file is accessible
+          can_read <- tryCatch({
+            con <- file(upload_path, "rb")
+            test_bytes <- readBin(con, "raw", n = 10)
+            close(con)
+            length(test_bytes) > 0
+          }, error = function(e) {
+            FALSE
+          })
+
+          if (can_read) {
+            file_ready <- TRUE
+          }
+        }
+
+        if (!file_ready) {
+          Sys.sleep(0.05)
+          wait_count <- wait_count + 1
+        }
+      }
+
+      if (!file_ready) {
+        showNotification(
+          paste("Uploaded", card_type, "image is not readable. Please try again."),
+          type = "error",
+          duration = 5
+        )
+        return()
+      }
+
       # Check for duplicate image before processing AND track upload
       message("=== UPLOAD TRACKING START (card_type: ", card_type, ") ===")
       image_hash <- calculate_image_hash(upload_path)
@@ -213,8 +262,8 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
         message("  ❌ Failed to track upload: ", e$message)
       })
       message("=== UPLOAD TRACKING END ===")
-      
-      # Create web URL
+
+      # Create web URL (ONLY after file is verified readable)
       norm_session_dir <- normalizePath(session_temp_dir, winslash = "/")
       norm_upload_path <- normalizePath(upload_path, winslash = "/")
       rel_path <- sub(paste0("^", gsub("/", "\\\\/", norm_session_dir), "/*"), "", norm_upload_path)
