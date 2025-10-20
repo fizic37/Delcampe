@@ -23,9 +23,11 @@ mod_delcampe_export_ui <- function(id) {
 #' @param image_paths Reactive containing vector of image web URLs
 #' @param image_file_paths Reactive containing vector of actual file system paths (optional)
 #' @param image_type Character string ("lot" or "combined") to distinguish image types
+#' @param ebay_api Reactive eBay API object from mod_ebay_auth_server (optional)
+#' @param ebay_account_manager EbayAccountManager object for multi-account support (optional)
 #'
 #' @noRd
-mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_file_paths = reactive(NULL), image_type = "combined") {
+mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_file_paths = reactive(NULL), image_type = "combined", ebay_api = reactive(NULL), ebay_account_manager = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
     
@@ -149,9 +151,16 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
             6,
             div(
               style = "text-align: center;",
-              tags$img(
-                src = path,
-                style = "width: 100%; max-height: 300px; object-fit: contain; border-radius: 8px; border: 1px solid #dee2e6;"
+              actionLink(
+                ns(paste0("enlarge_img_", idx)),
+                tags$img(
+                  src = path,
+                  style = "width: 100%; max-height: 300px; object-fit: contain; border-radius: 8px; border: 1px solid #dee2e6; cursor: pointer;"
+                )
+              ),
+              div(
+                style = "margin-top: 8px; font-size: 12px; color: #868e96;",
+                icon("search-plus"), " Click to enlarge"
               )
             )
           ),
@@ -953,7 +962,28 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
         })
       })
     })
-    
+
+    # Image Enlargement Handlers - Show modal with full-size image
+    observe({
+      req(image_paths())
+      paths <- image_paths()
+
+      lapply(seq_along(paths), function(i) {
+        observeEvent(input[[paste0("enlarge_img_", i)]], ignoreNULL = TRUE, ignoreInit = TRUE, {
+          showModal(modalDialog(
+            title = paste0(tools::toTitleCase(image_type), " Image ", i),
+            tags$img(
+              src = paths[i],
+              style = "width: 100%; height: auto; max-height: 80vh; object-fit: contain;"
+            ),
+            easyClose = TRUE,
+            footer = modalButton("Close"),
+            size = "l"
+          ))
+        })
+      })
+    })
+
     # Return module interface
     return(list(
       get_sent_count = reactive(length(rv$sent_images)),
