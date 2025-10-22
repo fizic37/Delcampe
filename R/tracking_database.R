@@ -1692,9 +1692,12 @@ get_session_cards <- function(session_id) {
     con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
     on.exit(DBI::dbDisconnect(con), add = TRUE)
 
+    # Get ALL cards involved in this session, regardless of action type
+    # This includes uploaded, processed, reused, and images_combined actions
     query <- "
-      SELECT
+      SELECT DISTINCT
         pc.card_id,
+        pc.file_hash,
         pc.original_filename,
         pc.image_type,
         pc.file_size,
@@ -1703,6 +1706,9 @@ get_session_cards <- function(session_id) {
         cp.crop_paths,
         cp.grid_rows,
         cp.grid_cols,
+        cp.h_boundaries,
+        cp.v_boundaries,
+        cp.extraction_dir,
         cp.ai_title,
         cp.ai_description,
         cp.ai_condition,
@@ -1724,7 +1730,6 @@ get_session_cards <- function(session_id) {
         WHERE upload_path NOT LIKE '%Temp%'
       ) i ON pc.file_hash = i.file_hash AND i.rn = 1
       WHERE sa.session_id = ?
-        AND sa.action IN ('processed', 'images_combined')
       ORDER BY 
         CASE pc.image_type
           WHEN 'face' THEN 1
@@ -1735,6 +1740,12 @@ get_session_cards <- function(session_id) {
     "
 
     result <- DBI::dbGetQuery(con, query, params = list(session_id))
+    
+    message("📊 get_session_cards found ", nrow(result), " cards for session ", session_id)
+    if (nrow(result) > 0) {
+      message("   Types: ", paste(result$image_type, collapse = ", "))
+    }
+    
     return(result)
 
   }, error = function(e) {
@@ -1742,6 +1753,7 @@ get_session_cards <- function(session_id) {
     return(data.frame())
   })
 }
+
 
 #' Format eBay status for display
 #'
