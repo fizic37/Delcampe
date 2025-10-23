@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-ABC123",
+  "object": "chat.completion",
+  "created": 1699999999,
+  "model": "gpt-4o",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\n  \"title\": \"Antique Postcard - London Bridge\",\n  \"description\": \"Historic postcard depicting London Bridge circa 1910. Sepia tone photograph with handwritten message on back. The bridge shows early 20th century architecture with horse-drawn carriages visible.\",\n  \"price\": \"20.00\",\n  \"condition\": \"Very Good\",\n  \"year\": \"1910\",\n  \"location\": \"London, England\",\n  \"publisher\": \"Valentine & Sons\",\n  \"series\": \"Celebrated Series\",\n  \"notes\": \"Handwritten message adds historical value. Minor corner wear but excellent overall condition.\"\n}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 980,
+    "completion_tokens": 145,
+    "total_tokens": 1125
+  }
+}

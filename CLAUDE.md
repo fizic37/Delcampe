@@ -108,10 +108,93 @@
 - **Do NOT** duplicate Golem's auto-generated documentation structure
 
 #### Testing Requirements
-- **Mandatory testing** for every module created
-- Use Golem's testing framework with testthat
-- Test UI components, server logic, and module interactions
-- Include error scenario and edge case testing
+
+##### Core Testing Mandate
+- **MANDATORY**: All new features and modules MUST include tests
+- **MANDATORY**: Run critical tests before EVERY commit - all must pass
+- Tests are NOT optional - they are a deliverable requirement for feature completion
+- Use the established testing infrastructure in `tests/testthat/`
+
+##### Testing Infrastructure (Two-Suite Strategy)
+
+**Critical Tests (Must Always Pass)**
+- Run before every commit: `source("dev/run_critical_tests.R")`
+- Expected result: 100% pass rate (currently ~170 tests)
+- Execution time: 10-20 seconds
+- Files: `test-ebay_helpers.R`, `test-utils_helpers.R`, `test-mod_delcampe_export.R`, `test-mod_tracking_viewer.R`
+- Purpose: Verify core business logic and prevent regressions
+- **Blocking**: Cannot commit if critical tests fail
+
+**Discovery Tests (Learning & Exploration)**
+- Run during development: `source("dev/run_discovery_tests.R")`
+- Expected result: Failures reveal insights (currently ~100 tests)
+- Execution time: 20-40 seconds
+- Files: `test-ai_api_helpers.R`, `test-tracking_database.R`, module templates
+- Purpose: Explore edge cases, document behavior, guide improvements
+- **Non-blocking**: Failures are learning opportunities
+
+##### Daily Testing Workflow
+
+```r
+# 1. Morning check (optional but recommended)
+source("dev/run_critical_tests.R")
+
+# 2. During development
+# - Write code
+# - Write/update tests
+# - Run critical tests frequently
+
+# 3. Before committing (MANDATORY)
+source("dev/run_critical_tests.R")
+# ALL tests must pass before commit
+
+# 4. When exploring/refactoring (as needed)
+source("dev/run_discovery_tests.R")
+```
+
+##### Test Development Standards
+- Use Golem's testthat framework (3rd edition)
+- Leverage helper functions: `helper-setup.R`, `helper-mocks.R`, `helper-fixtures.R`
+- Use `with_test_db()` for database testing (automatic cleanup)
+- Use `with_mocked_ai()` for API testing (no real API calls)
+- Test UI components with `shiny::testServer()` for reactive logic
+- Include error scenarios and edge cases
+- Follow patterns in existing test files
+
+##### Test File Organization
+- **Critical tests**: Core business logic that must always work
+  - `test-ebay_helpers.R` - eBay functionality
+  - `test-utils_helpers.R` - Utility functions
+  - `test-mod_delcampe_export.R` - Delcampe export module
+  - `test-mod_tracking_viewer.R` - Tracking viewer module
+- **Discovery tests**: Exploratory, edge cases, learning
+  - `test-ai_api_helpers.R` - AI integration
+  - `test-tracking_database.R` - Database functions
+  - `test-mod_login.R`, `test-mod_settings_llm.R` - Module templates
+- **New tests**: Start in discovery, migrate to critical when stable
+
+##### New Feature Checklist
+When implementing a new feature, you MUST:
+1. Write tests alongside code (not after)
+2. Use helper functions for test setup/teardown
+3. Test both success and error paths
+4. Run critical tests before committing
+5. Add new stable tests to critical suite (`dev/run_critical_tests.R`)
+6. Document test patterns if introducing new approaches
+
+##### Testing Documentation
+- **Quick reference**: `dev/TESTING_CHEATSHEET.md`
+- **Strategy explanation**: `dev/TESTING_STRATEGY.md`
+- **Complete guide**: `dev/TESTING_GUIDE.md`
+- **Getting started**: `dev/TESTING_QUICKSTART.md`
+- **Serena memory**: `.serena/memories/testing_infrastructure_complete_20251023.md`
+
+##### CI/CD Integration
+- GitHub Actions workflow: `.github/workflows/test.yaml`
+- Runs on: push to main/master/develop, pull requests
+- Must pass before merge
+
+**Remember**: Testing is not a burden - it's a safety net that enables confident refactoring and prevents regressions. The two-suite strategy makes testing fast for daily work (critical) while preserving exploration value (discovery).
 
 ### Module Design Principles
 - **ULTRA-THINK**: Before creating or splitting modules, conduct deep analysis of functional similarity

@@ -1,0 +1,18 @@
+{
+  "id": "msg_01ABC123XYZ",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\n  \"title\": \"Vintage Postcard - Paris Eiffel Tower\",\n  \"description\": \"Beautiful vintage postcard from Paris showing the Eiffel Tower in the 1920s. The image shows a sepia-toned photograph with 'Paris - La Tour Eiffel' text at the bottom. Good condition with minor wear on edges.\",\n  \"price\": \"15.00\",\n  \"condition\": \"Good\",\n  \"year\": \"1920s\",\n  \"location\": \"Paris, France\",\n  \"publisher\": \"Unknown\",\n  \"series\": \"\",\n  \"notes\": \"Minor edge wear, otherwise excellent. Sepia tone photograph. No writing on front.\"\n}"
+    }
+  ],
+  "model": "claude-3-5-sonnet-20241022",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 1250,
+    "output_tokens": 180
+  }
+}

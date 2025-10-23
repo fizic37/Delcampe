@@ -74,6 +74,188 @@ Test images are located in `test_images/`:
 - `test_face.jpg` - Face side of postcards (1915×3507)
 - `test_verso.jpg` - Verso side of postcards
 
+Test fixtures are located in `tests/fixtures/`:
+- `test_face.jpg` - Copy of face image for unit tests
+- `test_verso.jpg` - Copy of verso image for unit tests
+- `mock_api_responses/` - Mock JSON responses for external APIs
+
+## Testing Patterns
+
+### Helper Functions
+
+The test suite includes three helper files that are automatically sourced:
+
+#### `helper-setup.R` - Database Setup
+
+```r
+# Create an in-memory test database
+db <- create_test_db()
+
+# Clean up when done
+cleanup_test_db(db)
+
+# Or use withr-style wrapper
+with_test_db({
+  # db is available here
+  result <- get_or_create_card(db, "test_hash")
+})
+
+# Create test users
+user_id <- create_test_user(db, "testuser", "testpass", is_master = FALSE)
+
+# Create test sessions
+session_id <- create_test_session(db, user_id)
+```
+
+#### `helper-mocks.R` - External API Mocking
+
+```r
+# Mock Claude API response
+response <- mock_claude_response(success = TRUE)
+
+# Mock OpenAI API response
+response <- mock_openai_response(success = TRUE)
+
+# Mock eBay OAuth
+token <- mock_ebay_oauth(success = TRUE)
+
+# Use mocked AI in tests
+with_mocked_ai({
+  result <- call_claude_api(test_image, "Extract title")
+  expect_true(result$success)
+}, provider = "claude")
+
+# Use mocked eBay
+with_mocked_ebay({
+  token <- fetch_ebay_token()
+  expect_true(!is.null(token$access_token))
+})
+
+# Mock file upload for Shiny
+upload <- mock_file_upload(test_path("fixtures/test_face.jpg"))
+```
+
+#### `helper-fixtures.R` - Test Data Generators
+
+```r
+# Generate test card
+card <- generate_test_card(id = 1)
+
+# Generate test user
+user <- generate_test_user(username = "alice")
+
+# Generate AI extraction result
+extraction <- sample_ai_extraction(side = "face", quality = "high")
+
+# Generate test session
+session <- generate_test_session(session_id = 1, num_cards = 5)
+
+# Generate test crops
+crops <- generate_test_crops(num_crops = 6)
+
+# Generate eBay listing data
+listing <- generate_test_ebay_listing(listing_id = 1)
+
+# Generate Delcampe export data
+export <- generate_test_delcampe_export(export_id = 1)
+```
+
+### Testing Shiny Modules
+
+Use `shiny::testServer()` for module testing:
+
+```r
+test_that("module server logic works", {
+  testdb <- create_test_db()
+
+  shiny::testServer(
+    mod_example_server,
+    args = list(db = testdb, session_id = reactive(1)),
+    {
+      # Set inputs
+      session$setInputs(
+        input_field = "test value",
+        action_btn = 1
+      )
+
+      # Assert reactive values
+      expect_true(some_reactive_value())
+
+      # Assert outputs
+      expect_true(!is.null(output$result))
+    }
+  )
+
+  cleanup_test_db(testdb)
+})
+```
+
+### Testing Database Functions
+
+```r
+test_that("database function performs correctly", {
+  with_test_db({
+    # Arrange
+    card <- get_or_create_card(db, "test_hash")
+
+    # Act
+    result <- save_card_processing(db, card$card_id, 1, "face.jpg", "verso.jpg")
+
+    # Assert
+    expect_true(result$success)
+
+    # Verify in database
+    row <- DBI::dbGetQuery(db,
+      "SELECT * FROM card_processing WHERE card_id = ?",
+      params = list(card$card_id)
+    )
+    expect_equal(nrow(row), 1)
+  })
+})
+```
+
+### Testing with Mocked APIs
+
+```r
+test_that("AI extraction handles API errors gracefully", {
+  with_mocked_ai({
+    result <- extract_with_ai(
+      image_path = test_path("fixtures/test_face.jpg"),
+      provider = "claude"
+    )
+
+    expect_true(result$success)
+    expect_type(result$data$title, "character")
+  }, provider = "claude", success = TRUE)
+
+  # Test error handling
+  with_mocked_ai({
+    result <- extract_with_ai(
+      image_path = test_path("fixtures/test_face.jpg"),
+      provider = "claude"
+    )
+
+    expect_false(result$success)
+    expect_match(result$error, "Rate limit")
+  }, provider = "claude", success = FALSE)
+})
+```
+
+### Using Test Fixtures
+
+```r
+test_that("image processing works correctly", {
+  # Use test image from fixtures
+  test_img <- test_path("fixtures/test_face.jpg")
+
+  # Process image
+  result <- process_image(test_img)
+
+  # Assert
+  expect_true(file.exists(result$output_path))
+})
+```
+
 ## Adding New Tests
 
 ### For Automated Tests

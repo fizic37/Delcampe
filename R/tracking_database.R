@@ -573,17 +573,6 @@ find_card_processing <- function(file_hash, image_type) {
 
 # ==== LEGACY FUNCTIONS (UNCHANGED) ====
 
-#' Track image upload
-#' @param session_id Session identifier
-#' @param user_id User identifier  
-#' @param original_filename Original filename
-#' @param upload_path Where file was saved (relative path)
-#' @param content_category Content category ("cards", "stamps", etc.)
-#' @param image_type Type of image ('face', 'verso', etc.)
-#' @param file_size File size in bytes (optional)
-#' @param dimensions List with width and height (optional)
-#' @return Image ID from database
-#' @export
 #' Calculate MD5 hash of an image file for deduplication
 #' @param image_path Path to the image file
 #' @return Character string with MD5 hash, or NULL if error

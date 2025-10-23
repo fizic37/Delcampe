@@ -47,6 +47,15 @@ Thumbs.db
 # Cache
 .serena/cache/
 
+# Generated HTML files from markdown (documentation rendering)
+PRPs/*.html
+TASK_PRP/*.html
+docs/**/*.html
+
+# Coverage reports
+coverage-report.html
+*.coverage
+
 # Credentials and secrets (NEVER commit these!)
 .Renviron
 Ebay_Credentials.*
