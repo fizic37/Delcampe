@@ -67,7 +67,7 @@ jobs:
 
       # Cache R packages for faster builds
       - name: Cache R packages
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ${{ env.R_LIBS_USER }}
           key: ${{ runner.os }}-r-${{ hashFiles('DESCRIPTION') }}
@@ -116,7 +116,7 @@ jobs:
 
       # Upload coverage to Codecov (optional - requires Codecov setup)
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           file: ./coverage.xml
           flags: unittests
@@ -127,7 +127,7 @@ jobs:
       # Upload test results as artifacts
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: test-results
           path: |
