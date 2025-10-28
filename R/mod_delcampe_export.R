@@ -510,9 +510,9 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           return(NULL)
         }
 
-        # Check for existing card processing with AI data (combined images)
-        cat("      Querying database for existing AI data (image_type='combined')...\n")
-        existing <- find_card_processing(image_hash, "combined")
+        # Check for existing card processing with AI data
+        cat("      Querying database for existing AI data (image_type='", image_type, "')...\n", sep = "")
+        existing <- find_card_processing(image_hash, image_type)
 
         cat("      Database lookup result:\n")
         if (is.null(existing)) {
@@ -967,7 +967,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
                     card_result <- DBI::dbGetQuery(con, "
                       SELECT card_id FROM postal_cards
                       WHERE file_hash = ? AND image_type = ?
-                    ", list(image_hash, "combined"))
+                    ", list(image_hash, image_type))
 
                     cat("   Query result:\n")
                     if (nrow(card_result) == 0) {
@@ -984,7 +984,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
 
                       # Now check if a card_processing record exists
                       cat("   Step 3: Checking if card_processing record exists\n")
-                      existing_processing <- find_card_processing(image_hash, "combined")
+                      existing_processing <- find_card_processing(image_hash, image_type)
 
                       if (is.null(existing_processing)) {
                         cat("      ⚠️ No card_processing record exists - will be created\n")
@@ -1042,7 +1042,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
 
                         # Verify the save by reading back
                         cat("   Step 6: Verifying save by reading back from database\n")
-                        verify <- find_card_processing(image_hash, "combined")
+                        verify <- find_card_processing(image_hash, image_type)
                         if (!is.null(verify)) {
                           cat("      Verification successful:\n")
                           cat("         - ai_title:", if(is.null(verify$ai_title)) "NULL" else substr(verify$ai_title, 1, 50), "\n")
