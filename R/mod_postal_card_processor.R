@@ -193,7 +193,8 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
 
       # CRITICAL FIX: Wait for file to be readable (with retry logic)
       # This prevents race conditions where browser tries to load before file is ready
-      max_wait <- 10  # iterations
+      # Increased wait for WSL2 filesystem lag
+      max_wait <- 20  # iterations (increased from 10)
       wait_count <- 0
       file_ready <- FALSE
 
@@ -215,7 +216,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
         }
 
         if (!file_ready) {
-          Sys.sleep(0.05)
+          Sys.sleep(0.1)  # Increased from 0.05 (100ms delay)
           wait_count <- wait_count + 1
         }
       }
@@ -268,8 +269,9 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       norm_upload_path <- normalizePath(upload_path, winslash = "/")
       rel_path <- sub(paste0("^", gsub("/", "\\\\/", norm_session_dir), "/*"), "", norm_upload_path)
       rel_path <- sub("^/*", "", rel_path)
-      # CRITICAL FIX: Use paste with forward slash for web URLs, not file.path
-      rv$image_url_display <- paste(resource_prefix, rel_path, sep = "/")
+      # CRITICAL FIX: Add microsecond-precision cache-busting to prevent browser caching
+      cache_buster <- format(Sys.time(), "%Y%m%d%H%M%OS6")  # Microsecond precision
+      rv$image_url_display <- paste0(resource_prefix, "/", rel_path, "?v=", cache_buster)
       
       # Get image dimensions and detect grid
       if (python_sourced && exists("detect_grid_layout")) {
