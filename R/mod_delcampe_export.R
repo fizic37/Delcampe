@@ -239,7 +239,10 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
               "Condition *",
               choices = c(
                 "Used" = "used",
+                "Mint" = "mint",
+                "Near Mint" = "near mint",
                 "Excellent" = "excellent",
+                "Very Good" = "very good",
                 "Good" = "good",
                 "Fair" = "fair",
                 "Poor" = "poor"
@@ -249,7 +252,88 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
             )
           )
         ),
-        
+
+        # eBay Metadata Section
+        tags$hr(style = "margin-top: 20px; margin-bottom: 10px;"),
+        tags$h5("eBay Metadata (Optional)", style = "margin-bottom: 10px; color: #495057;"),
+
+        # Year and Era (width 6 each)
+        fluidRow(
+          column(
+            6,
+            textInput(
+              ns(paste0("year_", idx)),
+              "Year",
+              placeholder = "e.g., 1957",
+              width = "100%"
+            )
+          ),
+          column(
+            6,
+            selectInput(
+              ns(paste0("era_", idx)),
+              "Era",
+              choices = c(
+                "Not specified" = "",
+                "Undivided Back (pre-1907)" = "Undivided Back",
+                "Divided Back (1907-1915)" = "Divided Back",
+                "Linen (1930-1945)" = "Linen",
+                "Chrome (1939+)" = "Chrome"
+              ),
+              selected = "",
+              width = "100%"
+            )
+          )
+        ),
+
+        # City and Country (width 6 each)
+        fluidRow(
+          column(
+            6,
+            textInput(
+              ns(paste0("city_", idx)),
+              "City",
+              placeholder = "e.g., Buzias",
+              width = "100%"
+            )
+          ),
+          column(
+            6,
+            textInput(
+              ns(paste0("country_", idx)),
+              "Country",
+              placeholder = "e.g., Romania",
+              width = "100%"
+            )
+          )
+        ),
+
+        # Region (width 12)
+        fluidRow(
+          column(
+            12,
+            textInput(
+              ns(paste0("region_", idx)),
+              "Region/County",
+              placeholder = "e.g., Timis County",
+              width = "100%"
+            )
+          )
+        ),
+
+        # Theme Keywords (width 12)
+        fluidRow(
+          column(
+            12,
+            textInput(
+              ns(paste0("theme_keywords_", idx)),
+              "Theme Keywords",
+              placeholder = "e.g., view, town, church",
+              width = "100%"
+            )
+          )
+        ),
+
         # Action button - Send to eBay
         fluidRow(
           column(
@@ -268,7 +352,53 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
         )
       )
     }
-    
+
+    # Helper function to show eBay confirmation modal
+    # idx: Image index for unique button identification
+    show_ebay_confirmation_modal <- function(idx, title, price, condition, category = "Postcards") {
+      showModal(
+        modalDialog(
+          title = "Confirm eBay Listing",
+          size = "m",
+          easyClose = FALSE,
+
+          # Warning banner
+          div(
+            style = "padding: 12px; background: #fff3cd; border-left: 4px solid #ffc107; margin-bottom: 16px;",
+            icon("exclamation-triangle", style = "color: #856404;"),
+            strong(" Note: "),
+            "eBay charges listing fees. Please review details before creating the listing."
+          ),
+
+          # Listing details
+          tags$dl(
+            class = "row",
+            tags$dt(class = "col-sm-3", "Title:"),
+            tags$dd(class = "col-sm-9", title),
+
+            tags$dt(class = "col-sm-3", "Price:"),
+            tags$dd(class = "col-sm-9", sprintf("€%.2f", price)),
+
+            tags$dt(class = "col-sm-3", "Condition:"),
+            tags$dd(class = "col-sm-9", condition),
+
+            tags$dt(class = "col-sm-3", "Category:"),
+            tags$dd(class = "col-sm-9", category)
+          ),
+
+          footer = tagList(
+            modalButton("Cancel"),
+            actionButton(
+              ns(paste0("confirm_send_to_ebay_", idx)),
+              "Create Listing",
+              class = "btn-success",
+              icon = icon("check")
+            )
+          )
+        )
+      )
+    }
+
     # Helper function to convert web URL to file system path
     convert_web_path_to_file_path <- function(web_path) {
       cat("   🔍 Converting web path to file path...\n")
@@ -427,7 +557,13 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
             ai_description = existing$ai_description,
             ai_price = existing$ai_price,
             ai_condition = existing$ai_condition,
-            ai_model = existing$ai_model
+            ai_model = existing$ai_model,
+            ai_year = existing$ai_year,
+            ai_era = existing$ai_era,
+            ai_city = existing$ai_city,
+            ai_country = existing$ai_country,
+            ai_region = existing$ai_region,
+            ai_theme_keywords = existing$ai_theme_keywords
           ))
         } else {
           cat("   ℹ️ No existing AI data found for image", i, "\n")
@@ -492,6 +628,37 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
                 if (!is.null(ai_data$ai_condition) && !is.na(ai_data$ai_condition)) {
                   updateSelectInput(session, paste0("condition_", i), selected = ai_data$ai_condition)
                   cat("   ✓ Condition populated\n")
+                }
+
+                # Update metadata fields if available
+                if (!is.null(ai_data$ai_year) && !is.na(ai_data$ai_year) && ai_data$ai_year != "") {
+                  updateTextInput(session, paste0("year_", i), value = ai_data$ai_year)
+                  cat("   ✓ Year populated\n")
+                }
+
+                if (!is.null(ai_data$ai_era) && !is.na(ai_data$ai_era) && ai_data$ai_era != "") {
+                  updateSelectInput(session, paste0("era_", i), selected = ai_data$ai_era)
+                  cat("   ✓ Era populated\n")
+                }
+
+                if (!is.null(ai_data$ai_city) && !is.na(ai_data$ai_city) && ai_data$ai_city != "") {
+                  updateTextInput(session, paste0("city_", i), value = ai_data$ai_city)
+                  cat("   ✓ City populated\n")
+                }
+
+                if (!is.null(ai_data$ai_country) && !is.na(ai_data$ai_country) && ai_data$ai_country != "") {
+                  updateTextInput(session, paste0("country_", i), value = ai_data$ai_country)
+                  cat("   ✓ Country populated\n")
+                }
+
+                if (!is.null(ai_data$ai_region) && !is.na(ai_data$ai_region) && ai_data$ai_region != "") {
+                  updateTextInput(session, paste0("region_", i), value = ai_data$ai_region)
+                  cat("   ✓ Region populated\n")
+                }
+
+                if (!is.null(ai_data$ai_theme_keywords) && !is.na(ai_data$ai_theme_keywords) && ai_data$ai_theme_keywords != "") {
+                  updateTextInput(session, paste0("theme_keywords_", i), value = ai_data$ai_theme_keywords)
+                  cat("   ✓ Theme keywords populated\n")
                 }
 
                 # Show success status
@@ -647,11 +814,13 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
               }
 
               cat("   ✅ Using file path:", actual_path, "\n")
-              
+              cat("   Image type:", image_type, "\n")
+
               # Build enhanced prompt with price recommendation
+              # For combined images, card_count is not used in the prompt (AI counts them)
               prompt <- build_enhanced_postal_card_prompt(
-                extraction_type = if(image_type == "lot") "lot" else "individual",
-                card_count = 1
+                extraction_type = if(image_type == "lot") "lot" else if(image_type == "combined") "combined" else "individual",
+                card_count = 1  # Not relevant for combined type
               )
               
               cat("   Prompt built, calling API...\n")
@@ -701,9 +870,15 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
                 cat("   ✅ Parsing successful\n")
                 cat("      Title:", substr(parsed$title, 1, 50), "...\n")
                 cat("      Description:", substr(parsed$description, 1, 100), "...\n")
-                cat("      Condition:", parsed$condition, "\n")
                 cat("      Price: €", parsed$price, "\n")
-                
+                cat("      Condition: used (default - seller can adjust)\n")
+                cat("      Year:", if(is.null(parsed$year)) "NULL" else if(is.na(parsed$year)) "NA" else parsed$year, "\n")
+                cat("      Era:", if(is.null(parsed$era)) "NULL" else if(is.na(parsed$era)) "NA" else parsed$era, "\n")
+                cat("      City:", if(is.null(parsed$city)) "NULL" else if(is.na(parsed$city)) "NA" else parsed$city, "\n")
+                cat("      Country:", if(is.null(parsed$country)) "NULL" else if(is.na(parsed$country)) "NA" else parsed$country, "\n")
+                cat("      Region:", if(is.null(parsed$region)) "NULL" else if(is.na(parsed$region)) "NA" else parsed$region, "\n")
+                cat("      Theme Keywords:", if(is.null(parsed$theme_keywords)) "NULL" else if(is.na(parsed$theme_keywords)) "NA" else parsed$theme_keywords, "\n")
+
                 # Auto-fill form fields (both title and description are now textAreaInput)
                 cat("   📝 Updating form fields...\n")
 
@@ -722,6 +897,37 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
 
                   updateSelectInput(session, paste0("condition_", i), selected = parsed$condition)
                   cat("      Condition updated\n")
+
+                  # Update metadata fields if available
+                  if (!is.null(parsed$year) && !is.na(parsed$year) && parsed$year != "") {
+                    updateTextInput(session, paste0("year_", i), value = parsed$year)
+                    cat("      Year updated:", parsed$year, "\n")
+                  }
+
+                  if (!is.null(parsed$era) && !is.na(parsed$era) && parsed$era != "") {
+                    updateSelectInput(session, paste0("era_", i), selected = parsed$era)
+                    cat("      Era updated:", parsed$era, "\n")
+                  }
+
+                  if (!is.null(parsed$city) && !is.na(parsed$city) && parsed$city != "") {
+                    updateTextInput(session, paste0("city_", i), value = parsed$city)
+                    cat("      City updated:", parsed$city, "\n")
+                  }
+
+                  if (!is.null(parsed$country) && !is.na(parsed$country) && parsed$country != "") {
+                    updateTextInput(session, paste0("country_", i), value = parsed$country)
+                    cat("      Country updated:", parsed$country, "\n")
+                  }
+
+                  if (!is.null(parsed$region) && !is.na(parsed$region) && parsed$region != "") {
+                    updateTextInput(session, paste0("region_", i), value = parsed$region)
+                    cat("      Region updated:", parsed$region, "\n")
+                  }
+
+                  if (!is.null(parsed$theme_keywords) && !is.na(parsed$theme_keywords) && parsed$theme_keywords != "") {
+                    updateTextInput(session, paste0("theme_keywords_", i), value = parsed$theme_keywords)
+                    cat("      Theme keywords updated:", parsed$theme_keywords, "\n")
+                  }
 
                   cat("   ✅ Form fields updated\n")
                 }, delay = 0.1)
@@ -789,13 +995,19 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
 
                       cat("   Step 4: Preparing AI data to save\n")
 
-                      # Save AI data to card_processing table
+                      # Save AI data to card_processing table (including metadata)
                       ai_data <- list(
                         title = parsed$title,
                         description = parsed$description,
                         condition = parsed$condition,
                         price = parsed$price,
-                        model = if(selected_model == "claude") config$default_model else "gpt-4o"
+                        model = if(selected_model == "claude") config$default_model else "gpt-4o",
+                        year = parsed$year,
+                        era = parsed$era,
+                        city = parsed$city,
+                        country = parsed$country,
+                        region = parsed$region,
+                        theme_keywords = parsed$theme_keywords
                       )
 
                       cat("      AI data prepared:\n")
@@ -804,6 +1016,12 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
                       cat("         - Condition:", ai_data$condition, "\n")
                       cat("         - Price:", ai_data$price, "\n")
                       cat("         - Model:", ai_data$model, "\n")
+                      cat("         - Year:", if(is.null(parsed$year)) "NULL" else parsed$year, "\n")
+                      cat("         - Era:", if(is.null(parsed$era)) "NULL" else parsed$era, "\n")
+                      cat("         - City:", if(is.null(parsed$city)) "NULL" else parsed$city, "\n")
+                      cat("         - Country:", if(is.null(parsed$country)) "NULL" else parsed$country, "\n")
+                      cat("         - Region:", if(is.null(parsed$region)) "NULL" else parsed$region, "\n")
+                      cat("         - Theme Keywords:", if(is.null(parsed$theme_keywords)) "NULL" else parsed$theme_keywords, "\n")
 
                       cat("   Step 5: Calling save_card_processing()\n")
                       save_success <- save_card_processing(
@@ -831,6 +1049,10 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
                           cat("         - ai_price:", if(is.null(verify$ai_price)) "NULL" else verify$ai_price, "\n")
                           cat("         - ai_condition:", if(is.null(verify$ai_condition)) "NULL" else verify$ai_condition, "\n")
                           cat("         - ai_model:", if(is.null(verify$ai_model)) "NULL" else verify$ai_model, "\n")
+                          cat("         - ai_year:", if(is.null(verify$ai_year)) "NULL" else verify$ai_year, "\n")
+                          cat("         - ai_era:", if(is.null(verify$ai_era)) "NULL" else verify$ai_era, "\n")
+                          cat("         - ai_city:", if(is.null(verify$ai_city)) "NULL" else verify$ai_city, "\n")
+                          cat("         - ai_country:", if(is.null(verify$ai_country)) "NULL" else verify$ai_country, "\n")
                         } else {
                           cat("      ⚠️ Verification failed - could not read back data\n")
                           cat("         This might be OK if it's the first save (no last_processed yet)\n")
@@ -958,6 +1180,196 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           }, finally = {
             isolate({ rv$ai_extracting <- FALSE })
             cat("   🏁 AI extraction complete\n\n")
+          })
+        })
+      })
+    })
+
+    # Send to eBay Handlers - Show confirmation modal
+    observe({
+      req(image_paths())
+      paths <- image_paths()
+
+      lapply(seq_along(paths), function(i) {
+        observeEvent(input[[paste0("send_to_ebay_", i)]], ignoreNULL = TRUE, ignoreInit = TRUE, {
+          cat("\n🚀 Send to eBay button clicked for image", i, "\n")
+
+          # Get form inputs
+          title <- input[[paste0("item_title_", i)]]
+          description <- input[[paste0("item_description_", i)]]
+          price <- input[[paste0("starting_price_", i)]]
+          condition <- input[[paste0("condition_", i)]]
+
+          # Validate inputs
+          if (is.null(title) || trimws(title) == "") {
+            showNotification("Please enter a title", type = "error")
+            return()
+          }
+
+          if (is.null(description) || trimws(description) == "") {
+            showNotification("Please enter a description", type = "error")
+            return()
+          }
+
+          if (is.null(price) || is.na(price) || price <= 0) {
+            showNotification("Please enter a valid price", type = "error")
+            return()
+          }
+
+          # Show confirmation modal
+          show_ebay_confirmation_modal(i, title, price, condition)
+        })
+      })
+    })
+
+    # Confirm Send to eBay Handlers - Create eBay listing after confirmation
+    observe({
+      req(image_paths())
+      req(image_file_paths())
+      paths <- image_paths()
+      file_paths <- image_file_paths()
+
+      lapply(seq_along(paths), function(i) {
+        observeEvent(input[[paste0("confirm_send_to_ebay_", i)]], ignoreNULL = TRUE, ignoreInit = TRUE, {
+          cat("\n✅ Confirmed - Creating eBay listing for image", i, "\n")
+
+          # Close the modal
+          removeModal()
+
+          # Get form inputs
+          title <- input[[paste0("item_title_", i)]]
+          description <- input[[paste0("item_description_", i)]]
+          price <- input[[paste0("starting_price_", i)]]
+          condition <- input[[paste0("condition_", i)]]
+
+          # Get metadata inputs
+          year <- input[[paste0("year_", i)]]
+          era <- input[[paste0("era_", i)]]
+          city <- input[[paste0("city_", i)]]
+          country <- input[[paste0("country_", i)]]
+          region <- input[[paste0("region_", i)]]
+          theme_keywords <- input[[paste0("theme_keywords_", i)]]
+
+          # Check if eBay API is available
+          api <- ebay_api()
+          if (is.null(api)) {
+            showNotification("Please authenticate with eBay first", type = "error")
+            return()
+          }
+
+          # Get active eBay account
+          if (is.null(ebay_account_manager)) {
+            showNotification("eBay account manager not available", type = "error")
+            return()
+          }
+
+          active_account <- ebay_account_manager$get_active_account()
+          if (is.null(active_account)) {
+            showNotification("No active eBay account found", type = "error")
+            return()
+          }
+
+          # Create progress bar
+          progress <- shiny::Progress$new()
+          on.exit(progress$close(), add = TRUE)
+          progress$set(message = "Starting...", value = 0)
+
+          # Mark as pending
+          isolate({ rv$pending_images <- c(rv$pending_images, paths[i]) })
+
+          # Create AI data structure
+          ai_data <- list(
+            title = title,
+            description = description,
+            price = price,
+            condition = condition,
+            year = year,
+            era = era,
+            city = city,
+            country = country,
+            region = region,
+            theme_keywords = theme_keywords
+          )
+
+          # Get image file path
+          image_file <- file_paths[i]
+
+          cat("   Title:", title, "\n")
+          cat("   Price: $", price, "\n")
+          cat("   Condition:", condition, "\n")
+          cat("   Image:", image_file, "\n")
+
+          # Call listing creation function with progress callback
+          tryCatch({
+            result <- create_ebay_listing_from_card(
+              card_id = paste0("CARD_", i, "_", format(Sys.time(), "%Y%m%d_%H%M%S")),
+              ai_data = ai_data,
+              ebay_api = api,
+              session_id = "manual_export",
+              image_url = image_file,
+              ebay_user_id = active_account$user_id,
+              ebay_username = active_account$username,
+              progress_callback = function(msg, val) {
+                progress$set(message = msg, value = val)
+              }
+            )
+
+            # Update status based on result
+            isolate({
+              rv$pending_images <- setdiff(rv$pending_images, paths[i])
+
+              if (result$success) {
+                rv$sent_images <- c(rv$sent_images, paths[i])
+                showNotification(
+                  ui = div(
+                    style = "font-size: 14px;",
+                    tags$strong("✅ Successfully listed on eBay!"),
+                    tags$br(),
+                    tags$span("Item ID: ", tags$code(result$item_id)),
+                    tags$br(),
+                    tags$a(
+                      href = result$listing_url,
+                      target = "_blank",
+                      style = "color: #0064d2; text-decoration: underline; word-break: break-all;",
+                      result$listing_url
+                    )
+                  ),
+                  type = "message",
+                  duration = NULL,  # Stay until manually closed
+                  closeButton = TRUE
+                )
+              } else {
+                rv$failed_images <- c(rv$failed_images, paths[i])
+                showNotification(
+                  ui = div(
+                    style = "font-size: 14px;",
+                    tags$strong("❌ Failed to list on eBay"),
+                    tags$br(),
+                    tags$span("Error: ", result$error)
+                  ),
+                  type = "error",
+                  duration = NULL,  # Stay until manually closed
+                  closeButton = TRUE
+                )
+              }
+            })
+
+          }, error = function(e) {
+            isolate({
+              rv$pending_images <- setdiff(rv$pending_images, paths[i])
+              rv$failed_images <- c(rv$failed_images, paths[i])
+            })
+            showNotification(
+              ui = div(
+                style = "font-size: 14px;",
+                tags$strong("❌ Unexpected error"),
+                tags$br(),
+                tags$span("Error: ", e$message)
+              ),
+              type = "error",
+              duration = NULL,  # Stay until manually closed
+              closeButton = TRUE
+            )
           })
         })
       })

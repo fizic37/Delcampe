@@ -2,34 +2,16 @@
 % Please edit documentation in R/tracking_database.R
 \name{calculate_image_hash}
 \alias{calculate_image_hash}
-\title{Track image upload}
+\title{Calculate MD5 hash of an image file for deduplication}
 \usage{
 calculate_image_hash(image_path)
 }
 \arguments{
 \item{image_path}{Path to the image file}
-
-\item{session_id}{Session identifier}
-
-\item{user_id}{User identifier}
-
-\item{original_filename}{Original filename}
-
-\item{upload_path}{Where file was saved (relative path)}
-
-\item{content_category}{Content category ("cards", "stamps", etc.)}
-
-\item{image_type}{Type of image ('face', 'verso', etc.)}
-
-\item{file_size}{File size in bytes (optional)}
-
-\item{dimensions}{List with width and height (optional)}
 }
 \value{
-Image ID from database
-
 Character string with MD5 hash, or NULL if error
 }
 \description{
-Track image upload
+Calculate MD5 hash of an image file for deduplication
 }

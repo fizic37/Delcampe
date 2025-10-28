@@ -948,18 +948,172 @@ EbayMediaAPI <- R6::R6Class("EbayMediaAPI",
   )
 )
 
+# Handles eBay Taxonomy API for category aspects and suggestions
+# Handles eBay Taxonomy API for category aspects and suggestions
+# Handles eBay Taxonomy API for category aspects and suggestions
+# Handles eBay Taxonomy API for category aspects and suggestions
+# Handles eBay Taxonomy API for category aspects and suggestions
+# NOTE: Uses application-level tokens (client_credentials), not user tokens
+EbayTaxonomyAPI <- R6::R6Class("EbayTaxonomyAPI",
+  public = list(
+    config = NULL,
+    oauth = NULL,
+    
+    initialize = function(oauth, config) {
+      self$oauth <- oauth
+      self$config <- config
+      private$base_url <- if (config$environment == "sandbox") {
+        "https://api.sandbox.ebay.com"
+      } else {
+        "https://api.ebay.com"
+      }
+      # US marketplace category tree (0 = EBAY_US)
+      private$marketplace_id <- "0"
+      
+      # Get application token for public APIs (Taxonomy doesn't require user auth)
+      cat("   📋 Getting application token for Taxonomy API...\n")
+      app_token_result <- self$oauth$get_app_token()
+      if (app_token_result$success) {
+        cat("   ✓ Application token obtained\n")
+      } else {
+        warning("Failed to get application token: ", app_token_result$error)
+      }
+    },
+
+    get_category_aspects = function(category_id) {
+      # Check cache first
+      cache_key <- paste0("cat_", category_id)
+      if (!is.null(private$cache_category_aspects[[cache_key]])) {
+        cat("   (Using cached data)\n")
+        return(private$cache_category_aspects[[cache_key]])
+      }
+
+      # Build request URL with proper marketplace ID
+      url <- paste0(
+        private$base_url,
+        "/commerce/taxonomy/v1/category_tree/", private$marketplace_id,
+        "/get_item_aspects_for_category?category_id=",
+        category_id
+      )
+
+      cat("   API URL:", url, "\n")
+
+      # Make API call using application token (not user token)
+      tryCatch({
+        # Use the application token that was set in initialize()
+        token <- self$oauth$get_access_token()
+        
+        if (is.null(token) || token == "") {
+          # Try to get fresh application token
+          app_token_result <- self$oauth$get_app_token()
+          if (!app_token_result$success) {
+            return(list(
+              success = FALSE,
+              error = paste("Failed to get application token:", app_token_result$error)
+            ))
+          }
+          token <- app_token_result$access_token
+        }
+        
+        response <- httr2::request(url) |>
+          httr2::req_method("GET") |>
+          httr2::req_headers(
+            "Authorization" = paste("Bearer", token),
+            "Content-Type" = "application/json",
+            "Content-Language" = "en-US"
+          ) |>
+          httr2::req_perform()
+
+        # Check for HTTP errors
+        if (httr2::resp_status(response) >= 400) {
+          body_text <- tryCatch(
+            httr2::resp_body_string(response),
+            error = function(e) "(Could not read response body)"
+          )
+          return(list(
+            success = FALSE,
+            error = paste0("HTTP ", httr2::resp_status(response), ": ", body_text)
+          ))
+        }
+
+        # Parse response
+        result <- httr2::resp_body_json(response)
+
+        # Extract condition aspect
+        conditions <- NULL
+        if (!is.null(result$aspects) && length(result$aspects) > 0) {
+          # Find condition aspect by searching through aspects list
+          for (i in seq_along(result$aspects)) {
+            aspect <- result$aspects[[i]]
+            if (!is.null(aspect$localizedAspectName) && aspect$localizedAspectName == "Condition") {
+              # Found condition aspect - extract values
+              if (!is.null(aspect$aspectValues) && length(aspect$aspectValues) > 0) {
+                conditions <- sapply(aspect$aspectValues, function(v) {
+                  if (!is.null(v$localizedValue)) v$localizedValue else NA
+                })
+                conditions <- conditions[!is.na(conditions)]
+              }
+              break
+            }
+          }
+        }
+
+        # Cache result
+        cache_data <- list(
+          success = TRUE,
+          conditions = conditions,
+          aspects = result$aspects
+        )
+        private$cache_category_aspects[[cache_key]] <- cache_data
+
+        return(cache_data)
+
+      }, error = function(e) {
+        return(list(
+          success = FALSE,
+          error = paste("API error:", e$message)
+        ))
+      })
+    },
+
+    get_suggested_categories = function(query_text) {
+      # Implement: POST /commerce/taxonomy/v1/category_tree/MARKETPLACE_ID/get_category_suggestions
+      stop("Not implemented yet - see Task 3B.1")
+    }
+  ),
+  private = list(
+    base_url = NULL,
+    marketplace_id = NULL,
+    cache_category_aspects = list()  # Cache to avoid repeated API calls
+  )
+)
+
 # Initialize eBay API connection
 #' @export
 init_ebay_api <- function(environment = NULL) {
   config <- EbayAPIConfig$new(environment)
   oauth <- EbayOAuth$new(config)
+
+  # Inventory API (DEPRECATED for listings - kept for reference only)
+  # NOTE: Cannot create cross-border listings (Error 25002 - no Item.Country field)
+  # Use Trading API instead for listing creation
   inventory_api <- EbayInventoryAPI$new(oauth, config)
+
+  # Media API (still needed for image uploads)
   media_api <- EbayMediaAPI$new(config, oauth)
+
+  # Taxonomy API (category lookups)
+  taxonomy_api <- EbayTaxonomyAPI$new(oauth, config)
+
+  # Trading API (NEW - primary listing API for cross-border sellers)
+  trading_api <- EbayTradingAPI$new(oauth, config)
 
   return(list(
     config = config,
     oauth = oauth,
-    inventory = inventory_api,
-    media = media_api
+    inventory = inventory_api,  # DEPRECATED for listings
+    media = media_api,
+    taxonomy = taxonomy_api,
+    trading = trading_api  # NEW PRIMARY API
   ))
 }

@@ -204,13 +204,24 @@ mod_ebay_auth_server <- function(id, parent_session = NULL) {
     
     # Refresh status
     observeEvent(input$refresh_status, {
-      update_connection_status()
-      update_account_selector()
-      
+      # Reload tokens for active account
       active_account <- account_manager$get_active_account()
       if (!is.null(active_account)) {
+        api <- ebay_api()
+        api$oauth$set_tokens(
+          access_token = active_account$access_token,
+          refresh_token = active_account$refresh_token,
+          token_expiry = active_account$token_expiry
+        )
+        ebay_api(api)
+      }
+
+      update_connection_status()
+      update_account_selector()
+
+      if (!is.null(active_account)) {
         showNotification(
-          paste("Active:", active_account$username),
+          paste("Refreshed tokens for:", active_account$username),
           type = "message"
         )
       } else {
@@ -290,7 +301,10 @@ mod_ebay_auth_server <- function(id, parent_session = NULL) {
               paste("Successfully connected:", user_info$username),
               type = "message"
             )
-            
+
+            # Update the global ebay_api reactive value with fresh tokens
+            ebay_api(api)
+
             # Update UI
             update_connection_status()
             update_account_selector()

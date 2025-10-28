@@ -407,3 +407,125 @@ test_that("helpers handle special eBay characters", {
 
   expect_true(!is.null(validation))
 })
+
+# ==== TRADING API CONDITION MAPPING TESTS ====
+
+test_that("map_condition_to_trading_id maps all conditions correctly", {
+  # All postcards use condition ID 3000 (Used) for category 262042
+  # Detailed condition goes in aspects, not condition_id
+  expect_equal(map_condition_to_trading_id("mint"), 3000)
+  expect_equal(map_condition_to_trading_id("near mint"), 3000)
+  expect_equal(map_condition_to_trading_id("excellent"), 3000)
+  expect_equal(map_condition_to_trading_id("very good"), 3000)
+  expect_equal(map_condition_to_trading_id("good"), 3000)
+  expect_equal(map_condition_to_trading_id("fair"), 3000)
+  expect_equal(map_condition_to_trading_id("poor"), 3000)
+  expect_equal(map_condition_to_trading_id("used"), 3000)
+})
+
+test_that("map_condition_to_trading_id handles case variations", {
+  expect_equal(map_condition_to_trading_id("Mint"), 3000)
+  expect_equal(map_condition_to_trading_id("VERY GOOD"), 3000)
+  expect_equal(map_condition_to_trading_id("Good"), 3000)
+})
+
+test_that("map_condition_to_trading_id handles NULL and empty", {
+  expect_equal(map_condition_to_trading_id(NULL), 3000)
+  expect_equal(map_condition_to_trading_id(""), 3000)
+  expect_equal(map_condition_to_trading_id("  "), 3000)
+})
+
+test_that("map_condition_to_trading_id defaults unknown conditions", {
+  expect_warning(result <- map_condition_to_trading_id("unknown"))
+  expect_equal(result, 3000)
+})
+
+# ==== ERA INFERENCE TESTS ====
+
+test_that("infer_era_from_year maps all era ranges correctly", {
+  expect_equal(infer_era_from_year(1900), "Undivided Back")
+  expect_equal(infer_era_from_year(1905), "Undivided Back")
+  expect_equal(infer_era_from_year(1907), "Divided Back")
+  expect_equal(infer_era_from_year(1910), "Divided Back")
+  expect_equal(infer_era_from_year(1915), "Divided Back")
+  expect_equal(infer_era_from_year(1930), "Linen")
+  expect_equal(infer_era_from_year(1935), "Linen")
+  expect_equal(infer_era_from_year(1945), "Linen")
+  expect_equal(infer_era_from_year(1939), "Chrome")
+  expect_equal(infer_era_from_year(1950), "Chrome")
+  expect_equal(infer_era_from_year(2000), "Chrome")
+})
+
+test_that("infer_era_from_year handles string input", {
+  expect_equal(infer_era_from_year("1957"), "Chrome")
+  expect_equal(infer_era_from_year("1910"), "Divided Back")
+})
+
+test_that("infer_era_from_year handles NULL and invalid input", {
+  expect_null(infer_era_from_year(NULL))
+  expect_null(infer_era_from_year(NA))
+  expect_null(infer_era_from_year("invalid"))
+  expect_null(infer_era_from_year(""))
+})
+
+# ==== ASPECT EXTRACTION WITH AI METADATA TESTS ====
+
+test_that("extract_postcard_aspects uses AI-provided era", {
+  ai_data <- list(
+    title = "Test Postcard",
+    description = "Test description",
+    era = "Chrome"
+  )
+
+  aspects <- extract_postcard_aspects(ai_data)
+
+  expect_equal(aspects$Era[[1]], "Chrome")
+})
+
+test_that("extract_postcard_aspects infers era from AI year", {
+  ai_data <- list(
+    title = "Test Postcard",
+    description = "Test description",
+    year = "1957"
+  )
+
+  aspects <- extract_postcard_aspects(ai_data)
+
+  expect_equal(aspects$Era[[1]], "Chrome")
+})
+
+test_that("extract_postcard_aspects adds city from AI", {
+  ai_data <- list(
+    title = "Test Postcard",
+    description = "Test description",
+    city = "Buzias"  # Already ASCII from AI prompt
+  )
+
+  aspects <- extract_postcard_aspects(ai_data)
+
+  expect_equal(aspects$City[[1]], "Buzias")
+})
+
+test_that("extract_postcard_aspects uses AI theme keywords", {
+  ai_data <- list(
+    title = "Test",
+    description = "Test",
+    theme_keywords = "view, town, street"
+  )
+
+  aspects <- extract_postcard_aspects(ai_data)
+
+  expect_equal(aspects$Theme[[1]], "Cities & Towns")
+})
+
+test_that("extract_postcard_aspects falls back to text parsing", {
+  ai_data <- list(
+    title = "Vintage Postcard from 1930",
+    description = "Shows a beautiful church and landscape"
+  )
+
+  aspects <- extract_postcard_aspects(ai_data)
+
+  # Should infer era from year in title
+  expect_true(grepl("1930|Linen", aspects$Era[[1]]))
+})

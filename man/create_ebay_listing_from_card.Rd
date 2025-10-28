@@ -13,7 +13,8 @@ create_ebay_listing_from_card(
   session_id,
   image_url = NULL,
   ebay_user_id = NULL,
-  ebay_username = NULL
+  ebay_username = NULL,
+  progress_callback = NULL
 )
 }
 \arguments{
@@ -30,6 +31,9 @@ create_ebay_listing_from_card(
 \item{ebay_user_id}{eBay user ID from account manager}
 
 \item{ebay_username}{eBay username for tracking}
+
+\item{progress_callback}{Optional callback function(message, value) to report progress.
+Called at key stages with message (string) and value (0.0 to 1.0).}
 }
 \value{
 List with success status, listing_id, offer_id, sku, listing_url

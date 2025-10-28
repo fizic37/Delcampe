@@ -4,7 +4,7 @@
 \alias{extract_postcard_aspects}
 \title{Extract postcard aspects from AI data}
 \usage{
-extract_postcard_aspects(ai_data)
+extract_postcard_aspects(ai_data, condition_code = NULL)
 }
 \description{
 Extract postcard aspects from AI data

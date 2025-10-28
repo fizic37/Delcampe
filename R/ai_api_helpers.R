@@ -157,8 +157,9 @@ call_claude_api <- function(image_path, model_name, api_key, prompt, temperature
   }
   
   tryCatch({
-    # Compress image if needed (Claude has 5 MB limit)
-    processed_image_path <- compress_image_if_needed(image_path, max_size_mb = 4.5)
+    # Compress image if needed (Claude has 5 MB limit for base64-encoded images)
+    # Base64 increases size by ~33%, so target 3.7 MB to stay under 5 MB after encoding
+    processed_image_path <- compress_image_if_needed(image_path, max_size_mb = 3.7)
     
     # Read and encode image as base64
     image_data <- readBin(processed_image_path, "raw", file.info(processed_image_path)$size)
@@ -299,7 +300,8 @@ call_openai_api <- function(image_path, model_name, api_key, prompt, temperature
   
   tryCatch({
     # Compress image if needed (OpenAI also has size limits)
-    processed_image_path <- compress_image_if_needed(image_path, max_size_mb = 4.5)
+    # Base64 increases size by ~33%, so target 3.7 MB to stay under 5 MB after encoding
+    processed_image_path <- compress_image_if_needed(image_path, max_size_mb = 3.7)
     
     # Read and encode image as base64
     image_data <- readBin(processed_image_path, "raw", file.info(processed_image_path)$size)
@@ -486,30 +488,32 @@ build_postal_card_prompt <- function(extraction_type = "individual", card_count 
 #' @noRd
 build_enhanced_postal_card_prompt <- function(extraction_type = "individual", card_count = 1) {
   
+  # CRITICAL: ASCII-only instruction at the top
+  ascii_instruction <- "IMPORTANT: Use ONLY ASCII characters in your output. Replace all diacritics:
+- Romanian: ă→a, â→a, î→i, ș→s, ț→t
+- European: é→e, è→e, ü→u, ö→o, ñ→n, ç→c
+- Examples: București → Bucuresti, Buziaș → Buzias, café → cafe, Timișoara → Timisoara
+
+"
+  
   base_prompt <- "You are an expert postal history analyst and vintage postcard appraiser. Analyze this image carefully and provide:\n\n"
   
   if (extraction_type == "lot") {
-    prompt <- paste0(base_prompt,
-      "1. TITLE: A concise, descriptive title (50-80 characters)\n",
+    prompt <- paste0(ascii_instruction, base_prompt,
+      "1. TITLE: A concise, descriptive title (50-80 characters, ASCII only)\n",
       "   - Include collection theme or type\n",
       "   - Include era if identifiable\n",
       "   - Example: 'Vintage Postcard Lot - European Tourist Views, 1920s-1940s'\n\n",
-      "2. DESCRIPTION: Detailed description (150-300 characters)\n",
+      "2. DESCRIPTION: Detailed description (150-300 characters, ASCII only)\n",
       "   - Overall theme or collection type\n",
       "   - Notable cards or highlights\n",
       "   - Approximate time period(s)\n",
-      "   - General condition assessment\n",
-      "   - Historical significance or collecting value\n\n",
-      "3. CONDITION: Assess overall condition\n",
-      "   - Options: excellent, good, fair, poor\n",
-      "   - Excellent: No visible damage, crisp images\n",
-      "   - Good: Minor edge wear, images clear\n",
-      "   - Fair: Moderate wear, some fading\n",
-      "   - Poor: Significant damage or fading\n\n",
-      "4. RECOMMENDED_PRICE: Suggest eBay sale price in US Dollars (USD)\n",
+      "   - Visible characteristics (colors, printing style)\n",
+      "   - Historical significance or collecting value\n",
+      "   - DO NOT assess condition - seller will determine that\n\n",
+      "3. RECOMMENDED_PRICE: Suggest eBay sale price in US Dollars (USD)\n",
       "   - Consider age (older = more valuable)\n",
       "   - Consider subjects (tourist landmarks > generic)\n",
-      "   - Consider condition\n",
       "   - Consider quantity (more cards = higher total)\n",
       "   - Typical range per card: $2.00 - $12.00\n",
       "   - Format: numeric value only (e.g., 20.00 for a lot of 10)\n\n",
@@ -517,38 +521,92 @@ build_enhanced_postal_card_prompt <- function(extraction_type = "individual", ca
       "Provide response in this EXACT format:\n",
       "TITLE: [title here]\n",
       "DESCRIPTION: [description here]\n",
-      "CONDITION: [excellent|good|fair|poor]\n",
       "PRICE: [numeric value]"
     )
-  } else {
-    prompt <- paste0(base_prompt,
-      "1. TITLE: A concise, descriptive title (50-80 characters)\n",
-      "   - Include location if visible\n",
+  } else if (extraction_type == "combined") {
+    # Combined face+verso image
+    prompt <- paste0(ascii_instruction, base_prompt,
+      "IMPORTANT: This image shows BOTH SIDES of postcard(s):\n",
+      "- TOP ROW: Front/face side(s) showing the picture/view\n",
+      "- BOTTOM ROW: Back/verso side(s) showing the address/message area\n",
+      "Analyze ALL postcards visible as a complete unit.\n\n",
+      "REQUIRED FIELDS:\n\n",
+      "1. TITLE: A concise, descriptive title (50-80 characters, ASCII only)\n",
+      "   - Include location if visible (e.g., Buzias, not Buziaș)\n",
       "   - Include era if identifiable\n",
-      "   - Example: 'Vintage Postcard - Paris Eiffel Tower, 1920s'\n\n",
-      "2. DESCRIPTION: Detailed description (150-300 characters)\n",
-      "   - Describe the scene/subject\n",
-      "   - Note any visible text or landmarks\n",
-      "   - Mention condition observations\n",
-      "   - Historical context if applicable\n\n",
-      "3. CONDITION: Assess condition based on visible wear\n",
-      "   - Options: excellent, good, fair, poor\n",
-      "   - Excellent: No visible damage, crisp image\n",
-      "   - Good: Minor edge wear, image clear\n",
-      "   - Fair: Moderate wear, some fading\n",
-      "   - Poor: Significant damage or fading\n\n",
-      "4. RECOMMENDED_PRICE: Suggest eBay sale price in US Dollars (USD)\n",
-      "   - Consider age (older = more valuable)\n",
-      "   - Consider subject (tourist landmarks > generic scenes)\n",
-      "   - Consider condition\n",
-      "   - Consider printing quality visible in image\n",
-      "   - Typical range: $2.00 - $12.00\n",
-      "   - Format: numeric value only (e.g., 3.50)\n\n",
+      "   - If multiple cards, find common theme or location\n",
+      "   - Example: 'Vintage Postcards - Romanian Town Views, 1930s'\n\n",
+      "2. DESCRIPTION: Detailed description (150-300 characters, ASCII only)\n",
+      "   - Describe ALL cards visible\n",
+      "   - Note any visible text, postmarks, or landmarks\n",
+      "   - Mention visible characteristics (colors, clarity, printing style)\n",
+      "   - Historical context if applicable\n",
+      "   - DO NOT assess condition - seller will determine that\n\n",
+      "3. RECOMMENDED_PRICE: Suggest eBay sale price in US Dollars (USD)\n",
+      "   - Count ALL postcards in the image\n",
+      "   - Price per card: $2.00 - $12.00 depending on age/rarity\n",
+      "   - Format: numeric value only (e.g., 15.00 for 3 cards at $5 each)\n\n",
+      "EBAY METADATA (OPTIONAL - from the most prominent/clear card):\n\n",
+      "5. YEAR: Year visible on postcard or postmark (e.g., 1957)\n",
+      "6. ERA: Postcard era (pre-1907: Undivided Back, 1907-1915: Divided Back, 1930-1945: Linen, 1939+: Chrome)\n",
+      "7. CITY: City/town name visible (ASCII only, e.g., Buzias not Buziaș)\n",
+      "8. COUNTRY: Country name (e.g., Romania)\n",
+      "9. REGION: State/region/county if visible (ASCII only)\n",
+      "10. THEME_KEYWORDS: Keywords for theme detection (e.g., view, town, church)\n\n",
       "Provide response in this EXACT format:\n",
       "TITLE: [title here]\n",
       "DESCRIPTION: [description here]\n",
-      "CONDITION: [excellent|good|fair|poor]\n",
-      "PRICE: [numeric value]"
+      "PRICE: [numeric value]\n",
+      "YEAR: [year or omit if not visible]\n",
+      "ERA: [era or omit if no year]\n",
+      "CITY: [city or omit if not visible]\n",
+      "COUNTRY: [country or omit if not visible]\n",
+      "REGION: [region or omit if not visible]\n",
+      "THEME_KEYWORDS: [keywords or omit if not identifiable]"
+    )
+  } else {
+    # Individual image
+    prompt <- paste0(ascii_instruction, base_prompt,
+      "REQUIRED FIELDS:\n\n",
+      "1. TITLE: A concise, descriptive title (50-80 characters, ASCII only)\n",
+      "   - Include location if visible (e.g., Buzias, not Buziaș)\n",
+      "   - Include era if identifiable\n",
+      "   - Example: 'Vintage Postcard - Paris Eiffel Tower, 1920s'\n\n",
+      "2. DESCRIPTION: Detailed description (150-300 characters, ASCII only)\n",
+      "   - Describe the scene/subject\n",
+      "   - Note any visible text or landmarks\n",
+      "   - Mention visible characteristics (colors, clarity, printing style)\n",
+      "   - Historical context if applicable\n",
+      "   - DO NOT assess condition - seller will determine that\n\n",
+      "3. RECOMMENDED_PRICE: Suggest eBay sale price in US Dollars (USD)\n",
+      "   - Consider age (older = more valuable)\n",
+      "   - Consider subject (tourist landmarks > generic scenes)\n",
+      "   - Consider printing quality visible in image\n",
+      "   - Typical range: $2.00 - $12.00\n",
+      "   - Format: numeric value only (e.g., 3.50)\n\n",
+      "EBAY METADATA (OPTIONAL - provide if visible on postcard):\n\n",
+      "5. YEAR: Year visible on postcard or postmark (e.g., 1957)\n",
+      "   - Look for postmark dates, printed dates, or visible year text\n",
+      "   - If not visible, omit this field\n\n",
+      "6. ERA: Postcard era (only if year is present)\n",
+      "   - pre-1907: Undivided Back\n",
+      "   - 1907-1915: Divided Back\n",
+      "   - 1930-1945: Linen\n",
+      "   - 1939+: Chrome\n\n",
+      "7. CITY: City/town name visible on postcard (ASCII only, e.g., Buzias not Buziaș)\n\n",
+      "8. COUNTRY: Country name (e.g., Romania, France, Germany)\n\n",
+      "9. REGION: State/region/county if visible (ASCII only, e.g., Timis County not Timiș)\n\n",
+      "10. THEME_KEYWORDS: Keywords for theme detection (e.g., view, town, church, landscape, railway)\n\n",
+      "Provide response in this EXACT format:\n",
+      "TITLE: [title here]\n",
+      "DESCRIPTION: [description here]\n",
+      "PRICE: [numeric value]\n",
+      "YEAR: [year or omit if not visible]\n",
+      "ERA: [era or omit if no year]\n",
+      "CITY: [city or omit if not visible]\n",
+      "COUNTRY: [country or omit if not visible]\n",
+      "REGION: [region or omit if not visible]\n",
+      "THEME_KEYWORDS: [keywords or omit if not identifiable]"
     )
   }
   
@@ -625,12 +683,18 @@ parse_enhanced_ai_response <- function(ai_response) {
       title = "",
       description = "",
       condition = "used",
-      price = 2.50
+      price = 2.50,
+      year = NULL,
+      era = NULL,
+      city = NULL,
+      country = NULL,
+      region = NULL,
+      theme_keywords = NULL
     ))
   }
   
   # Extract title
-  title_match <- regexpr("TITLE:\\s*(.+?)(?=\n|$)", ai_response, perl = TRUE)
+  title_match <- regexpr("TITLE:\\s*(.+?)(?=\\n|$)", ai_response, perl = TRUE)
   if (title_match > 0) {
     title_start <- attr(title_match, "capture.start")[1]
     title_length <- attr(title_match, "capture.length")[1]
@@ -638,7 +702,7 @@ parse_enhanced_ai_response <- function(ai_response) {
     title <- trimws(title)
   } else {
     # Fallback: use first line
-    first_line <- strsplit(ai_response, "\n")[[1]][1]
+    first_line <- strsplit(ai_response, "\\n")[[1]][1]
     title <- trimws(first_line)
     if (nchar(title) > 80) {
       title <- substr(title, 1, 77)
@@ -647,7 +711,7 @@ parse_enhanced_ai_response <- function(ai_response) {
   }
   
   # Extract description (match up to CONDITION or end) - use DOTALL to match newlines
-  desc_match <- regexpr("DESCRIPTION:\\s*(.+?)(?=\nCONDITION:|\nPRICE:|$)", ai_response, perl = TRUE)
+  desc_match <- regexpr("DESCRIPTION:\\s*(.+?)(?=\\nCONDITION:|\\nPRICE:|$)", ai_response, perl = TRUE)
   if (desc_match > 0) {
     desc_start <- attr(desc_match, "capture.start")[1]
     desc_length <- attr(desc_match, "capture.length")[1]
@@ -660,23 +724,16 @@ parse_enhanced_ai_response <- function(ai_response) {
       # Get everything after DESCRIPTION:
       after_desc <- desc_parts[2]
       # Split at CONDITION: if present
-      before_condition <- strsplit(after_desc, "\nCONDITION:")[[1]][1]
+      before_condition <- strsplit(after_desc, "\\nCONDITION:")[[1]][1]
       description <- trimws(before_condition)
     } else {
       description <- ""
     }
   }
   
-  # Extract condition
-  condition_match <- regexpr("CONDITION:\\s*(excellent|good|fair|poor|used)", ai_response, perl = TRUE, ignore.case = TRUE)
-  if (condition_match > 0) {
-    cond_start <- attr(condition_match, "capture.start")[1]
-    cond_length <- attr(condition_match, "capture.length")[1]
-    condition <- tolower(substr(ai_response, cond_start, cond_start + cond_length - 1))
-    condition <- trimws(condition)
-  } else {
-    condition <- "used"  # Default
-  }
+  # Condition: Always default to "used" (seller will manually adjust if needed)
+  # AI no longer assesses condition - this is subjective and best determined by seller
+  condition <- "used"
   
   # Extract price
   price_match <- regexpr("PRICE:\\s*([0-9]+\\.?[0-9]*)", ai_response, perl = TRUE)
@@ -696,11 +753,80 @@ parse_enhanced_ai_response <- function(ai_response) {
     price <- 2.50  # Default fallback
   }
   
+  # Extract optional eBay metadata fields (NULL if not present)
+  # Note: AI prompt ensures ASCII-only output, so no diacritic removal needed!
+  
+  # Extract year
+  year_match <- regexpr("YEAR:\\s*([0-9]{4})", ai_response, perl = TRUE)
+  year <- if (year_match > 0) {
+    year_start <- attr(year_match, "capture.start")[1]
+    year_length <- attr(year_match, "capture.length")[1]
+    trimws(substr(ai_response, year_start, year_start + year_length - 1))
+  } else {
+    NULL
+  }
+  
+  # Extract era
+  era_match <- regexpr("ERA:\\s*(.+?)(?=\\n|$)", ai_response, perl = TRUE)
+  era <- if (era_match > 0) {
+    era_start <- attr(era_match, "capture.start")[1]
+    era_length <- attr(era_match, "capture.length")[1]
+    trimws(substr(ai_response, era_start, era_start + era_length - 1))
+  } else {
+    NULL
+  }
+  
+  # Extract city
+  city_match <- regexpr("CITY:\\s*(.+?)(?=\\n|$)", ai_response, perl = TRUE)
+  city <- if (city_match > 0) {
+    city_start <- attr(city_match, "capture.start")[1]
+    city_length <- attr(city_match, "capture.length")[1]
+    trimws(substr(ai_response, city_start, city_start + city_length - 1))
+  } else {
+    NULL
+  }
+  
+  # Extract country
+  country_match <- regexpr("COUNTRY:\\s*(.+?)(?=\\n|$)", ai_response, perl = TRUE)
+  country <- if (country_match > 0) {
+    country_start <- attr(country_match, "capture.start")[1]
+    country_length <- attr(country_match, "capture.length")[1]
+    trimws(substr(ai_response, country_start, country_start + country_length - 1))
+  } else {
+    NULL
+  }
+  
+  # Extract region
+  region_match <- regexpr("REGION:\\s*(.+?)(?=\\n|$)", ai_response, perl = TRUE)
+  region <- if (region_match > 0) {
+    region_start <- attr(region_match, "capture.start")[1]
+    region_length <- attr(region_match, "capture.length")[1]
+    trimws(substr(ai_response, region_start, region_start + region_length - 1))
+  } else {
+    NULL
+  }
+  
+  # Extract theme keywords
+  theme_match <- regexpr("THEME_KEYWORDS:\\s*(.+?)(?=\\n|$)", ai_response, perl = TRUE)
+  theme_keywords <- if (theme_match > 0) {
+    theme_start <- attr(theme_match, "capture.start")[1]
+    theme_length <- attr(theme_match, "capture.length")[1]
+    trimws(substr(ai_response, theme_start, theme_start + theme_length - 1))
+  } else {
+    NULL
+  }
+  
   return(list(
     title = title,
     description = description,
     condition = condition,
-    price = price
+    price = price,
+    year = year,
+    era = era,
+    city = city,
+    country = country,
+    region = region,
+    theme_keywords = theme_keywords
   ))
 }
 

@@ -33,6 +33,14 @@ app_server <- function(input, output, session) {
   
   if (db_initialized) {
     cat("✅ Tracking database ready\n")
+
+    # Initialize eBay tables (includes api_type migration)
+    tryCatch({
+      initialize_ebay_tables("inst/app/data/tracking.sqlite")
+    }, error = function(e) {
+      cat("⚠️ Failed to initialize eBay tables:", e$message, "\n")
+    })
+
     # Start session tracking
     tryCatch({
       start_processing_session(

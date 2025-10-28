@@ -228,6 +228,44 @@ initialize_tracking_db <- function(db_path = "inst/app/data/tracking.sqlite") {
       message("⚠️ Migration warning: ", e$message)
     })
 
+    # Migration: Add eBay metadata columns to card_processing table
+    tryCatch({
+      # Check if columns exist
+      columns <- DBI::dbGetQuery(con, "PRAGMA table_info(card_processing)")
+
+      if (!"ai_year" %in% columns$name) {
+        DBI::dbExecute(con, "ALTER TABLE card_processing ADD COLUMN ai_year TEXT")
+        message("✅ Added ai_year column to card_processing table")
+      }
+
+      if (!"ai_era" %in% columns$name) {
+        DBI::dbExecute(con, "ALTER TABLE card_processing ADD COLUMN ai_era TEXT")
+        message("✅ Added ai_era column to card_processing table")
+      }
+
+      if (!"ai_city" %in% columns$name) {
+        DBI::dbExecute(con, "ALTER TABLE card_processing ADD COLUMN ai_city TEXT")
+        message("✅ Added ai_city column to card_processing table")
+      }
+
+      if (!"ai_country" %in% columns$name) {
+        DBI::dbExecute(con, "ALTER TABLE card_processing ADD COLUMN ai_country TEXT")
+        message("✅ Added ai_country column to card_processing table")
+      }
+
+      if (!"ai_region" %in% columns$name) {
+        DBI::dbExecute(con, "ALTER TABLE card_processing ADD COLUMN ai_region TEXT")
+        message("✅ Added ai_region column to card_processing table")
+      }
+
+      if (!"ai_theme_keywords" %in% columns$name) {
+        DBI::dbExecute(con, "ALTER TABLE card_processing ADD COLUMN ai_theme_keywords TEXT")
+        message("✅ Added ai_theme_keywords column to card_processing table")
+      }
+    }, error = function(e) {
+      message("⚠️ Migration warning: ", e$message)
+    })
+
     # ========== INDEXES ==========
     
     indexes <- c(
@@ -418,6 +456,31 @@ save_card_processing <- function(card_id, crop_paths, h_boundaries, v_boundaries
           update_fields <- c(update_fields, "ai_model = ?")
           params <- c(params, list(ai_data$model))
         }
+        # Add eBay metadata fields
+        if (!is.null(ai_data$year)) {
+          update_fields <- c(update_fields, "ai_year = ?")
+          params <- c(params, list(ai_data$year))
+        }
+        if (!is.null(ai_data$era)) {
+          update_fields <- c(update_fields, "ai_era = ?")
+          params <- c(params, list(ai_data$era))
+        }
+        if (!is.null(ai_data$city)) {
+          update_fields <- c(update_fields, "ai_city = ?")
+          params <- c(params, list(ai_data$city))
+        }
+        if (!is.null(ai_data$country)) {
+          update_fields <- c(update_fields, "ai_country = ?")
+          params <- c(params, list(ai_data$country))
+        }
+        if (!is.null(ai_data$region)) {
+          update_fields <- c(update_fields, "ai_region = ?")
+          params <- c(params, list(ai_data$region))
+        }
+        if (!is.null(ai_data$theme_keywords)) {
+          update_fields <- c(update_fields, "ai_theme_keywords = ?")
+          params <- c(params, list(ai_data$theme_keywords))
+        }
       }
 
       # Always update last_processed
@@ -439,8 +502,9 @@ save_card_processing <- function(card_id, crop_paths, h_boundaries, v_boundaries
         INSERT INTO card_processing (
           card_id, crop_paths, h_boundaries, v_boundaries,
           grid_rows, grid_cols, extraction_dir,
-          ai_title, ai_description, ai_condition, ai_price, ai_model
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ai_title, ai_description, ai_condition, ai_price, ai_model,
+          ai_year, ai_era, ai_city, ai_country, ai_region, ai_theme_keywords
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ", list(
         as.integer(card_id),
         crop_paths_json,
@@ -453,7 +517,13 @@ save_card_processing <- function(card_id, crop_paths, h_boundaries, v_boundaries
         if (!is.null(ai_data) && !is.null(ai_data$description)) ai_data$description else NA_character_,
         if (!is.null(ai_data) && !is.null(ai_data$condition)) ai_data$condition else NA_character_,
         if (!is.null(ai_data) && !is.null(ai_data$price)) as.numeric(ai_data$price) else NA_real_,
-        if (!is.null(ai_data) && !is.null(ai_data$model)) ai_data$model else NA_character_
+        if (!is.null(ai_data) && !is.null(ai_data$model)) ai_data$model else NA_character_,
+        if (!is.null(ai_data) && !is.null(ai_data$year)) ai_data$year else NA_character_,
+        if (!is.null(ai_data) && !is.null(ai_data$era)) ai_data$era else NA_character_,
+        if (!is.null(ai_data) && !is.null(ai_data$city)) ai_data$city else NA_character_,
+        if (!is.null(ai_data) && !is.null(ai_data$country)) ai_data$country else NA_character_,
+        if (!is.null(ai_data) && !is.null(ai_data$region)) ai_data$region else NA_character_,
+        if (!is.null(ai_data) && !is.null(ai_data$theme_keywords)) ai_data$theme_keywords else NA_character_
       ))
       message("Created processing for card_id: ", card_id)
     }
@@ -530,6 +600,12 @@ find_card_processing <- function(file_hash, image_type) {
         p.ai_condition,
         p.ai_price,
         p.ai_model,
+        p.ai_year,
+        p.ai_era,
+        p.ai_city,
+        p.ai_country,
+        p.ai_region,
+        p.ai_theme_keywords,
         p.last_processed
       FROM postal_cards c
       LEFT JOIN card_processing p ON c.card_id = p.card_id
@@ -562,7 +638,13 @@ find_card_processing <- function(file_hash, image_type) {
       ai_description = result$ai_description,
       ai_condition = result$ai_condition,
       ai_price = result$ai_price,
-      ai_model = result$ai_model
+      ai_model = result$ai_model,
+      ai_year = result$ai_year,
+      ai_era = result$ai_era,
+      ai_city = result$ai_city,
+      ai_country = result$ai_country,
+      ai_region = result$ai_region,
+      ai_theme_keywords = result$ai_theme_keywords
     ))
     
   }, error = function(e) {

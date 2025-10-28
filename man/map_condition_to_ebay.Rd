@@ -4,12 +4,20 @@
 \alias{map_condition_to_ebay}
 \title{eBay Helper Functions
 Utilities for mapping Delcampe data to eBay API requirements
-Map AI condition strings to eBay condition codes}
+Map AI condition strings to eBay Inventory API condition codes}
 \usage{
-map_condition_to_ebay(condition)
+map_condition_to_ebay(condition, use_unspecified = FALSE)
+}
+\arguments{
+\item{condition}{String condition from AI extraction}
+
+\item{use_unspecified}{If TRUE, return "UNSPECIFIED" for all conditions (bypasses validation)}
+}
+\value{
+String condition code for eBay Inventory API
 }
 \description{
 eBay Helper Functions
 Utilities for mapping Delcampe data to eBay API requirements
-Map AI condition strings to eBay condition codes
+Map AI condition strings to eBay Inventory API condition codes
 }

@@ -18,8 +18,12 @@ save_ebay_listing(
   aspects = NULL,
   environment = "sandbox",
   ebay_user_id = NULL,
-  ebay_username = NULL
+  ebay_username = NULL,
+  api_type = "inventory"
 )
+}
+\arguments{
+\item{api_type}{API type used: "trading" or "inventory" (default: "inventory")}
 }
 \description{
 Save eBay listing to database

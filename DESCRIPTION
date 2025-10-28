@@ -21,7 +21,8 @@ Imports:
     reticulate,
     RSQLite,
     shiny,
-    shinyjs
+    shinyjs,
+    xml2
 Suggests:
     chromote,
     covr,
