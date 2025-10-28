@@ -500,10 +500,18 @@ build_enhanced_postal_card_prompt <- function(extraction_type = "individual", ca
   
   if (extraction_type == "lot") {
     prompt <- paste0(ascii_instruction, base_prompt,
+      "IMPORTANT: This is a lot of ", card_count, " postal cards.\n",
+      "The image shows BOTH SIDES of each card:\n",
+      "- TOP ROW: Front/face sides (", card_count, " images)\n",
+      "- BOTTOM ROW: Back/verso sides (", card_count, " images)\n",
+      "- TOTAL POSTCARDS: ", card_count, " (not ", card_count * 2, "!)\n\n",
+
+      "REQUIRED FIELDS:\n\n",
       "1. TITLE: A concise, descriptive title (50-80 characters, ASCII only)\n",
-      "   - Include collection theme or type\n",
+      "   - Include collection theme or location\n",
       "   - Include era if identifiable\n",
-      "   - Example: 'Vintage Postcard Lot - European Tourist Views, 1920s-1940s'\n\n",
+      "   - Example: 'Vintage Postcard Lot - Romanian Town Views, 1930s'\n\n",
+
       "2. DESCRIPTION: Detailed description (150-300 characters, ASCII only)\n",
       "   - Overall theme or collection type\n",
       "   - Notable cards or highlights\n",
@@ -511,25 +519,60 @@ build_enhanced_postal_card_prompt <- function(extraction_type = "individual", ca
       "   - Visible characteristics (colors, printing style)\n",
       "   - Historical significance or collecting value\n",
       "   - DO NOT assess condition - seller will determine that\n\n",
+
       "3. RECOMMENDED_PRICE: Suggest eBay sale price in US Dollars (USD)\n",
-      "   - Consider age (older = more valuable)\n",
-      "   - Consider subjects (tourist landmarks > generic)\n",
-      "   - Consider quantity (more cards = higher total)\n",
+      "   - Price for ALL ", card_count, " postcards combined\n",
       "   - Typical range per card: $2.00 - $12.00\n",
-      "   - Format: numeric value only (e.g., 20.00 for a lot of 10)\n\n",
-      "Note: This is a lot of ", card_count, " postal cards.\n\n",
+      "   - Format: numeric value only (e.g., 15.00 for 3 cards at $5 each)\n\n",
+
+      "EBAY METADATA (extract from most prominent/clear card):\n",
+      "IMPORTANT: These fields improve eBay search ranking - extract when visible!\n\n",
+
+      "4. YEAR: Year visible on any postcard or postmark (e.g., 1957)\n",
+      "   - Look carefully at postmarks, printed dates\n",
+      "   - If multiple years visible, use earliest\n",
+      "   - If not visible, omit this field\n\n",
+
+      "5. ERA: Postcard era (only if year is determined)\n",
+      "   - pre-1907: Undivided Back\n",
+      "   - 1907-1915: Divided Back\n",
+      "   - 1930-1945: Linen\n",
+      "   - 1939+: Chrome\n\n",
+
+      "6. CITY: City/town name visible (ASCII only, e.g., Buzias not Buziaș)\n",
+      "   - Extract from visible text, labels, or postmarks\n",
+      "   - If multiple cities, use most prominent\n",
+      "   - VERY IMPORTANT for eBay collectors\n\n",
+
+      "7. COUNTRY: Country name (e.g., Romania, France, Germany)\n",
+      "   - Extract from text or identify from landmarks/language\n",
+      "   - If multiple countries, use most prominent\n\n",
+
+      "8. REGION: State/region/county if visible (ASCII only, e.g., Timis County not Timiș)\n\n",
+
+      "9. THEME_KEYWORDS: Keywords for theme detection (e.g., view, town, church, landscape)\n",
+      "   - Use 2-4 keywords that describe the overall collection theme\n\n",
+
       "Provide response in this EXACT format:\n",
       "TITLE: [title here]\n",
       "DESCRIPTION: [description here]\n",
-      "PRICE: [numeric value]"
+      "PRICE: [numeric value]\n",
+      "YEAR: [year or omit if not visible]\n",
+      "ERA: [era or omit if no year]\n",
+      "CITY: [city or omit if not visible]\n",
+      "COUNTRY: [country or omit if not visible]\n",
+      "REGION: [region or omit if not visible]\n",
+      "THEME_KEYWORDS: [keywords or omit if not identifiable]"
     )
   } else if (extraction_type == "combined") {
     # Combined face+verso image
     prompt <- paste0(ascii_instruction, base_prompt,
-      "IMPORTANT: This image shows BOTH SIDES of postcard(s):\n",
-      "- TOP ROW: Front/face side(s) showing the picture/view\n",
-      "- BOTTOM ROW: Back/verso side(s) showing the address/message area\n",
-      "Analyze ALL postcards visible as a complete unit.\n\n",
+      "IMPORTANT: This image shows ONE postcard with BOTH SIDES:\n",
+      "- Left side: Face (front showing the picture/view)\n",
+      "- Right side: Verso (back showing the address/message area)\n",
+      "You are analyzing 1 postcard, not 2 separate cards.\n\n",
+
+      "Analyze this single postcard.\n\n",
       "REQUIRED FIELDS:\n\n",
       "1. TITLE: A concise, descriptive title (50-80 characters, ASCII only)\n",
       "   - Include location if visible (e.g., Buzias, not Buziaș)\n",
