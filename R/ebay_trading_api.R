@@ -157,14 +157,39 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
         ack <- xml2::xml_text(xml2::xml_find_first(doc, ".//*[local-name()='Ack']"))
 
         if (ack %in% c("Success", "Warning")) {
-          image_url <- xml2::xml_text(xml2::xml_find_first(doc, ".//*[local-name()='FullURL']"))
+          # Parse FullURL (fallback)
+          full_url <- xml2::xml_text(xml2::xml_find_first(doc, ".//*[local-name()='FullURL']"))
+
+          # CRITICAL FIX: Parse PictureSetMember URLs (pre-processed, immediate gallery)
+          picture_set <- xml2::xml_find_all(doc, ".//*[local-name()='PictureSetMember']")
+
+          urls <- list()
+          for (member in picture_set) {
+            size <- xml2::xml_text(xml2::xml_find_first(member, ".//*[local-name()='PictureSize']"))
+            url <- xml2::xml_text(xml2::xml_find_first(member, ".//*[local-name()='MemberURL']"))
+
+            if (!is.na(size) && !is.na(url) && nchar(url) > 0) {
+              urls[[size]] <- url
+              cat("   Found PictureSetMember:", size, "->", substr(url, 1, 60), "...\n")
+            }
+          }
+
+          # Prefer in order: Supersize > Large > Medium > FullURL
+          # Supersize/Large are pre-processed and have gallery thumbnails ready
+          image_url <- urls[["Supersize"]] %||% urls[["Large"]] %||% urls[["Medium"]] %||% full_url
 
           cat("   ✅ Image uploaded to EPS\n")
+          cat("   Selected URL type:",
+              if (!is.null(urls[["Supersize"]])) "Supersize (best)"
+              else if (!is.null(urls[["Large"]])) "Large"
+              else if (!is.null(urls[["Medium"]])) "Medium"
+              else "FullURL (fallback)", "\n")
           cat("   URL:", image_url, "\n")
 
           return(list(
             success = TRUE,
-            image_url = image_url
+            image_url = image_url,
+            all_urls = urls  # For debugging
           ))
         } else {
           # Extract error
