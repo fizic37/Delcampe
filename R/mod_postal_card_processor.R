@@ -136,7 +136,8 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       crop_card_mapping = NULL,  # NEW: Track mapping of crop rows to card_id for AI extraction
       trigger_extraction = 0,  # NEW: Reactive trigger for extraction (incremented to trigger)
       current_image_hash = NULL,  # FIX: Hash of current uploaded image for duplicate detection
-      current_card_id = NULL  # FIX: Card ID from database tracking
+      current_card_id = NULL,  # FIX: Card ID from database tracking
+      processing_status = "idle"  # NEW: Track upload/processing state for double-click prevention and error handling
     )
     
     # ---- Python setup ----
@@ -158,6 +159,12 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
         return()
       }
 
+      # CRITICAL: Prevent double-click / simultaneous uploads while processing
+      if (rv$processing_status %in% c("uploading", "verifying", "detecting", "tracking")) {
+        message("  ⚠️ Upload already in progress, ignoring duplicate trigger (status: ", rv$processing_status, ")")
+        return()
+      }
+
       file_info <- input$image_upload
 
       # Reset state
@@ -172,7 +179,8 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       rv$boundaries_manually_adjusted <- FALSE
       rv$current_image_hash <- NULL  # FIX: Clear hash for new upload
       rv$current_card_id <- NULL  # FIX: Clear card ID for new upload
-      
+      rv$processing_status <- "uploading"  # NEW: Set to uploading (for double-click prevention)
+
       # Save uploaded file with verification
       timestamp <- format(Sys.time(), "%Y-%m-%d_%H-%M-%S")
       safe_filename <- paste0("uploaded_", card_type, "_", timestamp, ".jpg")
@@ -190,6 +198,9 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       }
 
       rv$image_path_original <- upload_path
+
+      # Update status: file copied, now verifying readability
+      rv$processing_status <- "verifying"
 
       # CRITICAL FIX: Wait for file to be readable (with retry logic)
       # This prevents race conditions where browser tries to load before file is ready
@@ -231,6 +242,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       }
 
       # Check for duplicate image before processing AND track upload
+      rv$processing_status <- "tracking"
       message("=== UPLOAD TRACKING START (card_type: ", card_type, ") ===")
       image_hash <- calculate_image_hash(upload_path)
       message("  📌 Hash calculated: ", substr(image_hash, 1, 12), "...")
@@ -264,15 +276,9 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       })
       message("=== UPLOAD TRACKING END ===")
 
-      # Create web URL (ONLY after file is verified readable)
-      norm_session_dir <- normalizePath(session_temp_dir, winslash = "/")
-      norm_upload_path <- normalizePath(upload_path, winslash = "/")
-      rel_path <- sub(paste0("^", gsub("/", "\\\\/", norm_session_dir), "/*"), "", norm_upload_path)
-      rel_path <- sub("^/*", "", rel_path)
-      # CRITICAL FIX: Add microsecond-precision cache-busting to prevent browser caching
-      cache_buster <- format(Sys.time(), "%Y%m%d%H%M%OS6")  # Microsecond precision
-      rv$image_url_display <- paste0(resource_prefix, "/", rel_path, "?v=", cache_buster)
-      
+      # Update status: starting grid detection
+      rv$processing_status <- "detecting"
+
       # Get image dimensions and detect grid
       if (python_sourced && exists("detect_grid_layout")) {
         # FILE VERIFICATION: Ensure file is ready before calling Python
@@ -341,9 +347,41 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           updateNumericInput(session, "num_cols_input", value = rv$current_grid_cols)
 
           rv$force_grid_redraw <- rv$force_grid_redraw + 1
+
+          # === URL CREATION: ONLY after grid detection succeeds ===
+          # CRITICAL FIX (2025-10-29): Delay URL creation until ALL data dependencies exist
+          # This prevents broken image icon that appeared when image_with_draggable_grid
+          # tried to render before rv$image_dims_original, rv$h_boundaries, and rv$v_boundaries were set.
+          # Previous issue: URL at line 274 → UI render → req() blocks → broken icon for 200-500ms
+          # New flow: Grid detection → set all data → create URL → UI renders complete image
+
+          # Create web URL for display
+          norm_session_dir <- normalizePath(session_temp_dir, winslash = "/")
+          norm_upload_path <- normalizePath(upload_path, winslash = "/")
+          rel_path <- sub(paste0("^", gsub("/", "\\\\/", norm_session_dir), "/*"), "", norm_upload_path)
+          rel_path <- sub("^/*", "", rel_path)
+          cache_buster <- format(Sys.time(), "%Y%m%d%H%M%OS6")
+          rv$image_url_display <- paste0(resource_prefix, "/", rel_path, "?v=", cache_buster)
+
+          # Update status: ready to display
+          rv$processing_status <- "ready"
+
+          message("  ✅ Image URL created, status = ready")
+        } else {
+          # Grid detection failed completely
+          rv$processing_status <- "error"
+
+          showNotification(
+            paste("Failed to detect grid in", card_type, "image. Please check image quality."),
+            type = "error",
+            duration = 5
+          )
+
+          message("  ❌ Grid detection failed, status = error")
+          return()  # Stop processing, don't create URL
         }
       }
-      
+
       # FALLBACK: If Python detection failed or unavailable, use image library to get dims
       if (is.null(rv$image_dims_original)) {
         # Try to read image with magick or other methods
@@ -385,13 +423,46 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           updateNumericInput(session, "num_cols_input", value = 1)
 
           rv$force_grid_redraw <- rv$force_grid_redraw + 1
+
+          # Fallback succeeded, create URL and set ready
+          norm_session_dir <- normalizePath(session_temp_dir, winslash = "/")
+          norm_upload_path <- normalizePath(upload_path, winslash = "/")
+          rel_path <- sub(paste0("^", gsub("/", "\\\\/", norm_session_dir), "/*"), "", norm_upload_path)
+          rel_path <- sub("^/*", "", rel_path)
+          cache_buster <- format(Sys.time(), "%Y%m%d%H%M%OS6")
+          rv$image_url_display <- paste0(resource_prefix, "/", rel_path, "?v=", cache_buster)
+
+          rv$processing_status <- "ready"
+
+          message("  ✅ Fallback dimensions set, URL created, status = ready")
         } else {
+          # Complete failure - no method worked
+          rv$processing_status <- "error"
+
           showNotification(
-            "Could not read image dimensions. Please install the 'magick' package.",
+            paste("Could not process", card_type, "image. Unsupported format or corrupted file."),
             type = "error",
-            duration = 10
+            duration = 5
           )
+
+          message("  ❌ All dimension detection methods failed, status = error")
+          return()  # Don't create URL
         }
+      }
+
+      # Check dimensions were obtained before proceeding
+      if (is.null(rv$image_dims_original)) {
+        # Complete failure - dimensions still NULL after all methods
+        rv$processing_status <- "error"
+
+        showNotification(
+          paste("Could not process", card_type, "image. Unsupported format or corrupted file."),
+          type = "error",
+          duration = 5
+        )
+
+        message("  ❌ All dimension detection methods failed, status = error")
+        return()  # Don't proceed to show controls
       }
       
       # Show controls
@@ -503,6 +574,14 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
     # ---- Handle "Use Existing" button from duplicate modal ----
     observeEvent(input$use_existing_crops, {
       req(rv$pending_existing_data)
+
+      # CRITICAL: Prevent double-click on modal button
+      if (isTRUE(rv$is_extracting)) {
+        message("  ⚠️ Already processing existing crops, ignoring duplicate click")
+        return()
+      }
+      rv$is_extracting <- TRUE  # Set flag to prevent concurrent processing
+      on.exit(rv$is_extracting <- FALSE)  # Always clear flag when done
       
       removeModal()
       
@@ -579,8 +658,15 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
     
     # ---- Handle "Process Anyway" button from duplicate modal ----
     observeEvent(input$process_anyway, {
+      # CRITICAL: Prevent double-click on modal button (debounce)
+      if (!is.null(rv$pending_existing_data)) {
+        # Only process if modal data still exists (prevents double-click)
+        rv$pending_existing_data <- NULL
+      } else {
+        return()  # Already processed, ignore duplicate click
+      }
+
       removeModal()
-      rv$pending_existing_data <- NULL
 
       showNotification("Processing with current grid boundaries", type = "message", duration = 2)
 
@@ -627,16 +713,35 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
     
     # ---- UI Rendering ----
     output$images_panel <- renderUI({
+      # === ERROR STATE: Show error message with retry ===
+      if (rv$processing_status == "error") {
+        return(div(
+          style = "width:100%; height:500px; display:flex; flex-direction: column; align-items:center; justify-content:center; background-color: #fff3cd; border: 2px solid #ffc107; border-radius: 8px;",
+          div(
+            style = "text-align: center; padding: 20px;",
+            icon("exclamation-triangle", style = "font-size: 48px; color: #856404; margin-bottom: 16px;"),
+            h5("Processing Failed", style = "color: #856404; margin-bottom: 8px;"),
+            p("An error occurred during image processing. Please try again.",
+              style = "color: #856404; font-size: 14px; margin: 0;"),
+            actionButton(ns("retry_upload"), "Try Again",
+                         class = "btn-warning",
+                         style = "margin-top: 16px;")
+          )
+        ))
+      }
+
+      # === EMPTY STATE: No upload yet ===
       if (is.null(rv$image_url_display)) {
         return(div(
           style = "width:100%; height:500px; display:flex; align-items:center; justify-content:center; color:#aaa; font-style:italic;",
           paste("Upload a", card_type, "image to start.")
         ))
       }
-      
+
+      # === READY STATE: Show grid UI (original code) ===
       tags$div(
         id = ns("grid_ui_wrapper"),
-        `data-draggrid` = "true", 
+        `data-draggrid` = "true",
         style = "position:relative; width:100%; height:500px; overflow:visible; border:1px solid #eee; margin-bottom:8px; background-color: #f5f5f5;",
         uiOutput(ns("image_with_draggable_grid"))
       )
@@ -705,7 +810,20 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
         )))
       )
     })
-    
+
+    # === RETRY UPLOAD HANDLER ===
+    # Reset status when user clicks retry after error
+    observeEvent(input$retry_upload, {
+      rv$processing_status <- "idle"
+      rv$image_url_display <- NULL
+
+      showNotification(
+        paste("Please upload a new", card_type, "image."),
+        type = "message",
+        duration = 3
+      )
+    })
+
     output$num_rows_ui <- renderUI({
       req(rv$current_grid_rows)
       numericInput(ns("num_rows_input"), "Grid Rows", value = rv$current_grid_rows, min = 1, max = 20)
@@ -931,6 +1049,9 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
         rv$current_grid_cols <- NULL
         rv$extracted_paths_web <- NULL
         rv$is_extracting <- FALSE
+
+        # NEW: Reset processing status
+        rv$processing_status <- "idle"
 
         # Reset file input (will trigger observer, but flag prevents execution)
         shinyjs::reset("image_upload")
