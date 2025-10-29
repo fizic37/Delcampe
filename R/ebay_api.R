@@ -79,12 +79,14 @@ EbayOAuth <- R6::R6Class("EbayOAuth",
     
     # Generate authorization URL for user consent
     generate_auth_url = function(scope = NULL) {
-      # Default scopes for postcard selling
+      # Default scopes for postcard selling via Trading API
+      # NOTE: Trading API requires different scopes than Inventory API
       if (is.null(scope)) {
         scope <- paste(
-          "https://api.ebay.com/oauth/api_scope/sell.inventory",
-          "https://api.ebay.com/oauth/api_scope/sell.account",
-          "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+          "https://api.ebay.com/oauth/api_scope",  # General API access (Trading API)
+          "https://api.ebay.com/oauth/api_scope/sell.inventory",  # Inventory API (backup)
+          "https://api.ebay.com/oauth/api_scope/sell.account",  # Account info
+          "https://api.ebay.com/oauth/api_scope/sell.fulfillment",  # Order fulfillment
           sep = " "
         )
       }

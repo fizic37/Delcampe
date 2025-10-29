@@ -235,27 +235,86 @@ mod_ebay_auth_server <- function(id, parent_session = NULL) {
     # Start OAuth flow for new account
     observeEvent(input$connect_new, {
       api <- ebay_api()
+
       if (is.null(api)) {
         api <- init_ebay_api()
         ebay_api(api)
       }
-      
+
       auth_url <- api$oauth$generate_auth_url()
-      
+
       # Open authorization URL in browser
-      browseURL(auth_url)
+      if (is.null(auth_url) || nchar(auth_url) == 0) {
+        showNotification(
+          "Error: Could not generate authorization URL. Check eBay API credentials.",
+          duration = NULL,
+          type = "error"
+        )
+        return()
+      }
+
+      # Try to open browser
+      tryCatch({
+        browseURL(auth_url)
+      }, error = function(e) {
+        # Silently continue - will show modal anyway
+      })
+
+      # Always show modal with URL (in case browser doesn't open)
+      showModal(modalDialog(
+        title = "eBay Authorization Required",
+        size = "l",
+        tags$div(
+          style = "padding: 15px;",
+          tags$p(
+            style = "font-size: 16px; margin-bottom: 15px;",
+            "We attempted to open your browser automatically. If it didn't open, please copy the URL below:"
+          ),
+          tags$div(
+            style = "background: #f5f5f5; border: 1px solid #ddd; border-radius: 4px; padding: 12px; margin-bottom: 15px; word-break: break-all;",
+            tags$code(
+              style = "font-size: 12px; color: #333;",
+              auth_url
+            )
+          ),
+          tags$div(
+            style = "margin-bottom: 15px;",
+            tags$button(
+              class = "btn btn-primary btn-sm",
+              onclick = sprintf("navigator.clipboard.writeText('%s'); alert('URL copied to clipboard!');", auth_url),
+              tags$i(class = "fa fa-copy"),
+              " Copy URL"
+            ),
+            tags$a(
+              href = auth_url,
+              target = "_blank",
+              class = "btn btn-success btn-sm",
+              style = "margin-left: 10px;",
+              tags$i(class = "fa fa-external-link"),
+              " Open in New Tab"
+            )
+          ),
+          tags$hr(),
+          tags$p(
+            style = "font-size: 14px; color: #666;",
+            tags$strong("Instructions:"),
+            tags$ol(
+              tags$li("Copy the URL above or click 'Open in New Tab'"),
+              tags$li("Sign in to your eBay account"),
+              tags$li("Click 'Agree' to authorize this application"),
+              tags$li("Copy the authorization code that appears"),
+              tags$li("Paste it below and click 'Submit'")
+            )
+          )
+        ),
+        footer = modalButton("Close")
+      ))
 
       # Show code input
       updateCheckboxInput(
         session = session,
         inputId = "show_code_input",
         value = TRUE
-      )
-
-      showNotification(
-        "Browser opened for eBay authorization. After authorizing, paste the code below.",
-        duration = 10,
-        type = "message"
       )
     })
     

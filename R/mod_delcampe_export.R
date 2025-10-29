@@ -356,6 +356,10 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
     # Helper function to show eBay confirmation modal
     # idx: Image index for unique button identification
     show_ebay_confirmation_modal <- function(idx, title, price, condition, category = "Postcards") {
+      button_id <- ns(paste0("confirm_send_to_ebay_", idx))
+
+      cat("   Creating modal with button ID:", button_id, "\n")
+
       showModal(
         modalDialog(
           title = "Confirm eBay Listing",
@@ -389,7 +393,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           footer = tagList(
             modalButton("Cancel"),
             actionButton(
-              ns(paste0("confirm_send_to_ebay_", idx)),
+              button_id,
               "Create Listing",
               class = "btn-success",
               icon = icon("check")
@@ -397,6 +401,8 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           )
         )
       )
+
+      cat("   Modal created with button ID:", button_id, "\n")
     }
 
     # Helper function to convert web URL to file system path
@@ -512,11 +518,13 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
 
         # Check for existing card processing with AI data
         cat("      Querying database for existing AI data (image_type='", image_type, "')...\n", sep = "")
+        cat("      Hash (first 12 chars):", substr(image_hash, 1, 12), "...\n")
         existing <- find_card_processing(image_hash, image_type)
 
         cat("      Database lookup result:\n")
         if (is.null(existing)) {
           cat("         ❌ No existing card found\n")
+          cat("      ℹ️  DEDUPLICATION: No existing AI data - will extract fresh\n")
         } else {
           cat("         ✅ Found card_id:", existing$card_id, "\n")
           cat("         - ai_title:", if(is.null(existing$ai_title)) "NULL" else substr(existing$ai_title, 1, 50), "\n")
@@ -534,6 +542,8 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
 
         if (has_ai_data) {
           cat("      ✨ Found existing AI data - storing for later\n")
+          cat("      ✅ DEDUPLICATION SUCCESS - Reusing AI data from card_id:", existing$card_id, "\n")
+          cat("         Last processed:", existing$last_processed %||% "Unknown", "\n")
 
           # Save as draft immediately
           draft_key <- as.character(i)
@@ -1192,8 +1202,6 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
 
       lapply(seq_along(paths), function(i) {
         observeEvent(input[[paste0("send_to_ebay_", i)]], ignoreNULL = TRUE, ignoreInit = TRUE, {
-          cat("\n🚀 Send to eBay button clicked for image", i, "\n")
-
           # Get form inputs
           title <- input[[paste0("item_title_", i)]]
           description <- input[[paste0("item_description_", i)]]
@@ -1225,14 +1233,19 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
     # Confirm Send to eBay Handlers - Create eBay listing after confirmation
     observe({
       req(image_paths())
-      req(image_file_paths())
       paths <- image_paths()
-      file_paths <- image_file_paths()
+
+      # Get file paths - may be NULL for some image types
+      file_paths <- if (!is.null(image_file_paths)) {
+        image_file_paths()
+      } else {
+        NULL
+      }
 
       lapply(seq_along(paths), function(i) {
-        observeEvent(input[[paste0("confirm_send_to_ebay_", i)]], ignoreNULL = TRUE, ignoreInit = TRUE, {
-          cat("\n✅ Confirmed - Creating eBay listing for image", i, "\n")
+        button_id <- paste0("confirm_send_to_ebay_", i)
 
+        observeEvent(input[[button_id]], ignoreNULL = TRUE, ignoreInit = TRUE, {
           # Close the modal
           removeModal()
 
@@ -1252,6 +1265,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
 
           # Check if eBay API is available
           api <- ebay_api()
+
           if (is.null(api)) {
             showNotification("Please authenticate with eBay first", type = "error")
             return()
@@ -1264,6 +1278,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           }
 
           active_account <- ebay_account_manager$get_active_account()
+
           if (is.null(active_account)) {
             showNotification("No active eBay account found", type = "error")
             return()
@@ -1292,12 +1307,12 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           )
 
           # Get image file path
-          image_file <- file_paths[i]
-
-          cat("   Title:", title, "\n")
-          cat("   Price: $", price, "\n")
-          cat("   Condition:", condition, "\n")
-          cat("   Image:", image_file, "\n")
+          image_file <- if (!is.null(file_paths) && i <= length(file_paths)) {
+            file_paths[i]
+          } else {
+            # Fallback to web path conversion for lot images
+            convert_web_path_to_file_path(paths[i])
+          }
 
           # Call listing creation function with progress callback
           tryCatch({

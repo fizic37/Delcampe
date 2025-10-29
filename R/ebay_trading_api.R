@@ -157,10 +157,10 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
         ack <- xml2::xml_text(xml2::xml_find_first(doc, ".//*[local-name()='Ack']"))
 
         if (ack %in% c("Success", "Warning")) {
-          # Parse FullURL (fallback)
+          # Parse FullURL - REQUIRED for gallery thumbnail generation per eBay docs
           full_url <- xml2::xml_text(xml2::xml_find_first(doc, ".//*[local-name()='FullURL']"))
 
-          # CRITICAL FIX: Parse PictureSetMember URLs (pre-processed, immediate gallery)
+          # Parse PictureSetMember URLs (for debugging only - NOT used for listing)
           picture_set <- xml2::xml_find_all(doc, ".//*[local-name()='PictureSetMember']")
 
           urls <- list()
@@ -174,17 +174,17 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
             }
           }
 
-          # Prefer in order: Supersize > Large > Medium > FullURL
-          # Supersize/Large are pre-processed and have gallery thumbnails ready
-          image_url <- urls[["Supersize"]] %||% urls[["Large"]] %||% urls[["Medium"]] %||% full_url
+          # CRITICAL: Must use FullURL for gallery thumbnails to generate
+          # Per eBay docs: "Using PictureSetMember URLs will result in gallery image not being generated"
+          # FullURL format: ends with _1.JPG or _12.JPG
+          image_url <- full_url
 
           cat("   ✅ Image uploaded to EPS\n")
-          cat("   Selected URL type:",
-              if (!is.null(urls[["Supersize"]])) "Supersize (best)"
-              else if (!is.null(urls[["Large"]])) "Large"
-              else if (!is.null(urls[["Medium"]])) "Medium"
-              else "FullURL (fallback)", "\n")
+          cat("   Using FullURL (required for gallery thumbnails)\n")
           cat("   URL:", image_url, "\n")
+          if (length(urls) > 0) {
+            cat("   Available sizes:", paste(names(urls), collapse=", "), "(not used)\n")
+          }
 
           return(list(
             success = TRUE,
@@ -271,17 +271,14 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
     #' @param item_data Item data list
     #' @return XML string
     build_add_item_xml = function(item_data) {
-      token <- private$oauth$get_access_token()
-
       # Create root element
       doc <- xml2::xml_new_root(
         "AddFixedPriceItemRequest",
         xmlns = "urn:ebay:apis:eBLBaseComponents"
       )
 
-      # Add credentials
-      creds <- xml2::xml_add_child(doc, "RequesterCredentials")
-      xml2::xml_add_child(creds, "eBayAuthToken", token)
+      # NOTE: For OAuth2, token goes in X-EBAY-API-IAF-TOKEN header, NOT in XML body
+      # RequesterCredentials is only for old Auth'n'Auth tokens
 
       # Add Item element
       item <- xml2::xml_add_child(doc, "Item")
@@ -350,24 +347,56 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
 
       # Add business policies (uses seller's existing policies from eBay account)
       # This is preferred over hardcoding ShippingDetails/ReturnPolicy
-      seller_profiles <- xml2::xml_add_child(item, "SellerProfiles")
-
       # Get policy IDs from account or fetch dynamically
       policy_ids <- private$get_business_policy_ids()
 
-      if (!is.null(policy_ids$fulfillment_id)) {
-        shipping_profile <- xml2::xml_add_child(seller_profiles, "SellerShippingProfile")
-        xml2::xml_add_child(shipping_profile, "ShippingProfileID", policy_ids$fulfillment_id)
-      }
+      # Only add SellerProfiles if we have at least one policy
+      # Empty SellerProfiles element causes eBay to reject the listing
+      has_policies <- !is.null(policy_ids$fulfillment_id) ||
+                      !is.null(policy_ids$payment_id) ||
+                      !is.null(policy_ids$return_id)
 
-      if (!is.null(policy_ids$payment_id)) {
-        payment_profile <- xml2::xml_add_child(seller_profiles, "SellerPaymentProfile")
-        xml2::xml_add_child(payment_profile, "PaymentProfileID", policy_ids$payment_id)
-      }
+      if (has_policies) {
+        seller_profiles <- xml2::xml_add_child(item, "SellerProfiles")
 
-      if (!is.null(policy_ids$return_id)) {
-        return_profile <- xml2::xml_add_child(seller_profiles, "SellerReturnProfile")
-        xml2::xml_add_child(return_profile, "ReturnProfileID", policy_ids$return_id)
+        if (!is.null(policy_ids$fulfillment_id)) {
+          shipping_profile <- xml2::xml_add_child(seller_profiles, "SellerShippingProfile")
+          xml2::xml_add_child(shipping_profile, "ShippingProfileID", policy_ids$fulfillment_id)
+        }
+
+        if (!is.null(policy_ids$payment_id)) {
+          payment_profile <- xml2::xml_add_child(seller_profiles, "SellerPaymentProfile")
+          xml2::xml_add_child(payment_profile, "PaymentProfileID", policy_ids$payment_id)
+        }
+
+        if (!is.null(policy_ids$return_id)) {
+          return_profile <- xml2::xml_add_child(seller_profiles, "SellerReturnProfile")
+          xml2::xml_add_child(return_profile, "ReturnProfileID", policy_ids$return_id)
+        }
+      } else {
+        # Fallback: Add basic shipping and payment details
+        cat("   No business policies found, using basic shipping/payment setup\n")
+
+        # Add shipping details (required)
+        shipping_details <- xml2::xml_add_child(item, "ShippingDetails")
+
+        # Add a basic economy shipping service
+        shipping_service <- xml2::xml_add_child(shipping_details, "ShippingServiceOptions")
+        xml2::xml_add_child(shipping_service, "ShippingService", "USPSFirstClass")
+        xml2::xml_add_child(shipping_service, "ShippingServicePriority", "1")
+        shipping_cost <- xml2::xml_add_child(shipping_service, "ShippingServiceCost", "3.00")
+        xml2::xml_set_attr(shipping_cost, "currencyID", "USD")
+
+        # Add payment methods (required)
+        xml2::xml_add_child(item, "PaymentMethods", "PayPal")
+        xml2::xml_add_child(item, "PayPalEmailAddress", "your-paypal@example.com")
+
+        # Add return policy (required)
+        return_policy <- xml2::xml_add_child(item, "ReturnPolicy")
+        xml2::xml_add_child(return_policy, "ReturnsAcceptedOption", "ReturnsAccepted")
+        xml2::xml_add_child(return_policy, "RefundOption", "MoneyBack")
+        xml2::xml_add_child(return_policy, "ReturnsWithinOption", "Days_30")
+        xml2::xml_add_child(return_policy, "ShippingCostPaidByOption", "Buyer")
       }
 
       # Convert to string
@@ -381,12 +410,17 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
     make_request = function(xml_body, call_name) {
       endpoint <- private$get_endpoint()
 
+      # Get OAuth2 token for IAF header
+      token <- private$oauth$get_access_token()
+
       # Build request with Trading API headers
+      # IMPORTANT: OAuth2 tokens MUST be in X-EBAY-API-IAF-TOKEN header, NOT in XML body
       req <- httr2::request(endpoint) |>
         httr2::req_headers(
           "X-EBAY-API-SITEID" = "0",  # 0 = US
           "X-EBAY-API-COMPATIBILITY-LEVEL" = "1355",  # Latest version
           "X-EBAY-API-CALL-NAME" = call_name,
+          "X-EBAY-API-IAF-TOKEN" = token,  # OAuth2 token goes here!
           "Content-Type" = "text/xml"
         ) |>
         httr2::req_body_raw(xml_body, type = "text/xml")

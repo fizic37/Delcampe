@@ -38,25 +38,34 @@ create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id
   }
   cat("   \u2705 All required fields present\n")
 
-  # Step 2: Upload image to eBay Picture Services (if local path)
+  # Step 2: Upload image (try Imgur first, fallback to eBay)
   if (is.null(image_url)) {
     image_url <- "https://via.placeholder.com/500x350.png?text=Postcard"
     cat("   Using placeholder image\n")
   } else if (file.exists(image_url)) {
-    cat("\n2. Uploading image to eBay Picture Services...\n")
+    cat("\n2. Uploading image...\n")
     cat("   Local path:", image_url, "\n")
-    if (!is.null(progress_callback)) progress_callback("Uploading image to eBay...", 0.3)
+    if (!is.null(progress_callback)) progress_callback("Uploading image...", 0.3)
 
-    # Use Trading API's EPS upload instead of Inventory API media upload
-    upload_result <- ebay_api$trading$upload_image(image_url)
+    # Try imgbb first (fast, reliable, simple API)
+    imgbb_result <- upload_to_imgbb(image_url)
 
-    if (!upload_result$success) {
-      cat("   \u274c Upload failed:", upload_result$error, "\n")
-      cat("   \u26a0\ufe0f Falling back to placeholder\n")
-      image_url <- "https://via.placeholder.com/500x350.png?text=Upload+Failed"
+    if (imgbb_result$success) {
+      image_url <- imgbb_result$url
+      cat("   \u2705 Image uploaded to imgbb:", image_url, "\n")
     } else {
-      image_url <- upload_result$image_url
-      cat("   \u2705 Image uploaded to EPS:", image_url, "\n")
+      # Fallback to eBay Picture Services
+      cat("   \u26a0\ufe0f imgbb failed, trying eBay Picture Services...\n")
+      upload_result <- ebay_api$trading$upload_image(image_url)
+
+      if (!upload_result$success) {
+        cat("   \u274c Both uploads failed\n")
+        cat("   \u26a0\ufe0f Using placeholder\n")
+        image_url <- "https://via.placeholder.com/500x350.png?text=Upload+Failed"
+      } else {
+        image_url <- upload_result$image_url
+        cat("   \u2705 Image uploaded to EPS:", image_url, "\n")
+      }
     }
   }
 
