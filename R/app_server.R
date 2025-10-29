@@ -450,6 +450,60 @@ app_server <- function(input, output, session) {
               message("⚠️ Failed to track combined images: ", e$message)
             })
 
+            # Track lot images in database (if they exist)
+            tryCatch({
+              lot_card_ids <- list()
+              for (i in seq_along(abs_lot_paths)) {
+                lot_path <- abs_lot_paths[i]
+
+                # Calculate hash for lot image
+                lot_hash <- calculate_image_hash(lot_path)
+
+                if (!is.null(lot_hash)) {
+                  # Create card entry for lot image
+                  card_id <- get_or_create_card(
+                    file_hash = lot_hash,
+                    image_type = "lot",
+                    original_filename = basename(lot_path),
+                    file_size = file.info(lot_path)$size
+                  )
+
+                  lot_card_ids[[i]] <- card_id
+
+                  # Save processing details for lot
+                  save_card_processing(
+                    card_id = card_id,
+                    crop_paths = NULL,
+                    h_boundaries = NULL,
+                    v_boundaries = NULL,
+                    grid_rows = as.integer(num_rows),
+                    grid_cols = as.integer(num_cols),
+                    extraction_dir = as.character(combined_output_dir),
+                    ai_data = NULL
+                  )
+
+                  # Track session activity
+                  track_session_activity(
+                    session_id = session$token,
+                    card_id = card_id,
+                    action = "lot_created",
+                    details = list(
+                      lot_index = i,
+                      lot_path = lot_path,
+                      grid = paste0(num_rows, "x", num_cols)
+                    )
+                  )
+                }
+              }
+
+              # Store lot card IDs for AI extraction
+              app_rv$lot_card_ids <- lot_card_ids
+
+              message("✅ Lot images tracked in database: ", length(lot_card_ids), " lot images")
+            }, error = function(e) {
+              message("⚠️ Failed to track lot images: ", e$message)
+            })
+
             cat("✅ Auto-processing complete!
 
 ")
@@ -723,6 +777,60 @@ app_server <- function(input, output, session) {
             message("✅ Combined images tracked in database: ", length(combined_card_ids), " cards")
           }, error = function(e) {
             message("⚠️ Failed to track combined images: ", e$message)
+          })
+
+          # Track lot images in database (if they exist)
+          tryCatch({
+            lot_card_ids <- list()
+            for (i in seq_along(abs_lot_paths)) {
+              lot_path <- abs_lot_paths[i]
+
+              # Calculate hash for lot image
+              lot_hash <- calculate_image_hash(lot_path)
+
+              if (!is.null(lot_hash)) {
+                # Create card entry for lot image
+                card_id <- get_or_create_card(
+                  file_hash = lot_hash,
+                  image_type = "lot",
+                  original_filename = basename(lot_path),
+                  file_size = file.info(lot_path)$size
+                )
+
+                lot_card_ids[[i]] <- card_id
+
+                # Save processing details for lot
+                save_card_processing(
+                  card_id = card_id,
+                  crop_paths = NULL,
+                  h_boundaries = NULL,
+                  v_boundaries = NULL,
+                  grid_rows = as.integer(num_rows),
+                  grid_cols = as.integer(num_cols),
+                  extraction_dir = as.character(combined_output_dir),
+                  ai_data = NULL
+                )
+
+                # Track session activity
+                track_session_activity(
+                  session_id = session$token,
+                  card_id = card_id,
+                  action = "lot_created",
+                  details = list(
+                    lot_index = i,
+                    lot_path = lot_path,
+                    grid = paste0(num_rows, "x", num_cols)
+                  )
+                )
+              }
+            }
+
+            # Store lot card IDs for AI extraction
+            app_rv$lot_card_ids <- lot_card_ids
+
+            message("✅ Lot images tracked in database: ", length(lot_card_ids), " lot images")
+          }, error = function(e) {
+            message("⚠️ Failed to track lot images: ", e$message)
           })
 
           cat("✅ Manual processing complete!\n\n")
