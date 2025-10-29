@@ -255,6 +255,79 @@ app_server <- function(input, output, session) {
   ebay_api <- ebay_auth$api
   ebay_account_manager <- ebay_auth$account_manager
 
+  # ======================================================================
+  # eBay STARTUP NOTIFICATION - Proactive Status Alert
+  # ======================================================================
+  # Architecture: Query ONCE on startup, not continuously
+  # Shows user eBay connection status before they navigate to eBay tab
+  # No reactive timers - resource efficient approach per user feedback
+  observe({
+    # Run once on startup (isolate to prevent reactive dependencies)
+    isolate({
+      active_account <- ebay_account_manager$get_active_account()
+
+      # Only show notification if an account is connected
+      if (!is.null(active_account)) {
+        # Calculate token status using helper function
+        token_status <- get_token_status(active_account$token_expiry)
+
+        # Determine notification type based on status
+        notification_type <- if (token_status$status == "expired") {
+          "error"
+        } else if (token_status$status %in% c("critical", "warning")) {
+          "warning"
+        } else {
+          "message"
+        }
+
+        # Build notification message with HTML formatting
+        notification_message <- HTML(paste0(
+          "<div style='font-size: 14px;'>",
+          "<strong style='font-size: 16px;'>eBay Connected:</strong> ",
+          "<span style='font-family: monospace;'>", active_account$username, "</span><br>",
+          "<strong>Environment:</strong> ",
+          "<span style='",
+          if (active_account$environment == "production") {
+            "color: green; font-weight: bold;"
+          } else {
+            "color: orange; font-weight: bold;"
+          },
+          "'>", toupper(active_account$environment), "</span><br>",
+          "<strong>Token Status:</strong> ",
+          token_status$status_text,
+          " <span style='color: #666;'>- expires ", token_status$time_remaining, "</span>",
+          if (token_status$needs_attention) {
+            paste0("<br><em style='font-size: 12px; color: #666;'>",
+                   "Visit Settings → eBay Connection for details",
+                   "</em>")
+          } else {
+            ""
+          },
+          "</div>"
+        ))
+
+        # Show notification
+        showNotification(
+          notification_message,
+          type = notification_type,
+          duration = if (token_status$needs_attention) NULL else 10,  # Persist if action needed
+          closeButton = TRUE
+        )
+
+        # Log to console for debugging (production logging)
+        cat("\n📊 eBay Status Notification (Startup):\n")
+        cat("   Account:", active_account$username, "\n")
+        cat("   Environment:", active_account$environment, "\n")
+        cat("   Status:", token_status$status_text, "\n")
+        cat("   Time remaining:", token_status$time_remaining, "\n")
+        cat("   Needs attention:", token_status$needs_attention, "\n\n")
+      } else {
+        # No account connected - silent (no notification spam)
+        cat("📊 eBay Status: No account connected\n\n")
+      }
+    })
+  })
+
   # Update grid info from active modules (SINGLE observer per module, no duplicates)
   observe({
     face_grid <- face_server_return$get_grid_info()

@@ -310,3 +310,125 @@ build_trading_item_data <- function(card_id, ai_data, image_url, country, locati
     aspects = aspects
   ))
 }
+
+#' Calculate Token Status for Display
+#'
+#' Analyzes token expiry timestamp and returns comprehensive status information
+#' for UI display including color coding, icons, and time remaining.
+#'
+#' @param token_expiry POSIXct timestamp of token expiration (can be NULL)
+#' @return List with status indicators and display text:
+#'   - status: One of "healthy", "warning", "critical", "expired", "unknown"
+#'   - alert_class: Bootstrap alert class for styling
+#'   - icon: Shiny icon object with inline styling
+#'   - status_text: Human-readable status message
+#'   - time_remaining: Formatted time string (e.g., "in 1h 47m", "expired 2h ago")
+#'   - needs_attention: Boolean indicating if user action required
+#'
+#' @details
+#' Status thresholds:
+#' - healthy: > 30 minutes remaining (green)
+#' - warning: 5-30 minutes remaining (yellow)
+#' - critical: < 5 minutes remaining (red)
+#' - expired: Past expiry time (red)
+#' - unknown: No expiry info available (gray)
+#'
+#' @examples
+#' # Healthy token (2 hours remaining)
+#' token_status <- get_token_status(Sys.time() + 7200)
+#' # token_status$status == "healthy"
+#' # token_status$time_remaining == "in 2h 0m"
+#'
+#' # Expiring soon (10 minutes remaining)
+#' token_status <- get_token_status(Sys.time() + 600)
+#' # token_status$status == "warning"
+#' # token_status$needs_attention == TRUE
+#' @export
+get_token_status <- function(token_expiry) {
+  # Handle NULL expiry (no token or unknown expiry)
+  if (is.null(token_expiry)) {
+    return(list(
+      status = "unknown",
+      alert_class = "alert-secondary",
+      icon = shiny::icon("question-circle", style = "color: gray;"),
+      status_text = "Unknown",
+      time_remaining = "Unknown",
+      needs_attention = TRUE
+    ))
+  }
+
+  # Calculate time remaining
+  now <- Sys.time()
+  seconds_remaining <- as.numeric(difftime(token_expiry, now, units = "secs"))
+
+  # Format time remaining for display
+  if (seconds_remaining < 0) {
+    # Token expired - show how long ago
+    abs_seconds <- abs(seconds_remaining)
+    if (abs_seconds < 3600) {
+      # Less than 1 hour ago
+      minutes <- round(abs_seconds / 60)
+      time_remaining_detail <- sprintf("expired %d minute%s ago",
+                                       minutes,
+                                       ifelse(minutes == 1, "", "s"))
+    } else {
+      # More than 1 hour ago
+      hours <- round(abs_seconds / 3600, 1)
+      time_remaining_detail <- sprintf("expired %.1f hour%s ago",
+                                       hours,
+                                       ifelse(hours == 1, "", "s"))
+    }
+  } else if (seconds_remaining < 3600) {
+    # Less than 1 hour remaining
+    minutes <- round(seconds_remaining / 60)
+    time_remaining_detail <- sprintf("in %d min", minutes)
+  } else {
+    # More than 1 hour remaining
+    hours <- floor(seconds_remaining / 3600)
+    minutes <- round((seconds_remaining %% 3600) / 60)
+    time_remaining_detail <- sprintf("in %dh %dm", hours, minutes)
+  }
+
+  # Determine status level based on thresholds
+  if (seconds_remaining < 0) {
+    # EXPIRED
+    return(list(
+      status = "expired",
+      alert_class = "alert-danger",
+      icon = shiny::icon("times-circle", style = "color: red;"),
+      status_text = "EXPIRED - Re-authorize Required",
+      time_remaining = time_remaining_detail,
+      needs_attention = TRUE
+    ))
+  } else if (seconds_remaining < 300) {
+    # CRITICAL: Less than 5 minutes (300 seconds)
+    return(list(
+      status = "critical",
+      alert_class = "alert-danger",
+      icon = shiny::icon("exclamation-triangle", style = "color: red;"),
+      status_text = "Expiring Imminently",
+      time_remaining = time_remaining_detail,
+      needs_attention = TRUE
+    ))
+  } else if (seconds_remaining < 1800) {
+    # WARNING: Less than 30 minutes (1800 seconds)
+    return(list(
+      status = "warning",
+      alert_class = "alert-warning",
+      icon = shiny::icon("exclamation-circle", style = "color: orange;"),
+      status_text = "Expiring Soon",
+      time_remaining = time_remaining_detail,
+      needs_attention = TRUE
+    ))
+  } else {
+    # HEALTHY: 30+ minutes remaining
+    return(list(
+      status = "healthy",
+      alert_class = "alert-success",
+      icon = shiny::icon("check-circle", style = "color: green;"),
+      status_text = "Active",
+      time_remaining = time_remaining_detail,
+      needs_attention = FALSE
+    ))
+  }
+}

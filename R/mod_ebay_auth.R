@@ -10,13 +10,13 @@ mod_ebay_auth_ui <- function(id) {
     div(
       class = "ebay-auth-container",
       h3("eBay API Connection"),
-      
+
       # Connection status
       uiOutput(ns("connection_status")),
-      
+
       # Account selector (shown when accounts exist)
       uiOutput(ns("account_selector")),
-      
+
       # Authentication buttons
       div(
         class = "auth-controls mt-3",
@@ -73,11 +73,17 @@ mod_ebay_auth_ui <- function(id) {
           )
         )
       ),
-      
+
       # Hidden input to control conditional panel
       div(
         style = "display: none;",
         checkboxInput(ns("show_code_input"), "", value = FALSE)
+      ),
+
+      # Account Overview Accordion (shown when connected) - AT BOTTOM
+      div(
+        class = "mt-4",
+        uiOutput(ns("account_overview_accordion"))
       )
     )
   )
@@ -109,8 +115,9 @@ mod_ebay_auth_server <- function(id, parent_session = NULL) {
       }
       
       ebay_api(api)
-      
+
       # Update UI
+      update_account_overview()
       update_connection_status()
       update_account_selector()
     })
@@ -118,7 +125,7 @@ mod_ebay_auth_server <- function(id, parent_session = NULL) {
     # Update connection status UI
     update_connection_status <- function() {
       active_account <- account_manager$get_active_account()
-      
+
       output$connection_status <- renderUI({
         if (!is.null(active_account)) {
           div(
@@ -139,7 +146,104 @@ mod_ebay_auth_server <- function(id, parent_session = NULL) {
         }
       })
     }
-    
+
+    # Update account overview accordion
+    update_account_overview <- function() {
+      active_account <- account_manager$get_active_account()
+
+      output$account_overview_accordion <- renderUI({
+        if (!is.null(active_account)) {
+          # Get token status
+          token_status <- get_token_status(active_account$token_expiry)
+
+          # Environment badge styling
+          env_style <- if (active_account$environment == "production") {
+            "background-color: #d4edda; color: #155724; padding: 4px 8px; border-radius: 4px; font-weight: bold;"
+          } else {
+            "background-color: #fff3cd; color: #856404; padding: 4px 8px; border-radius: 4px; font-weight: bold;"
+          }
+
+          # Token status styling
+          token_style <- switch(
+            token_status$status,
+            "healthy" = "color: green; font-weight: bold;",
+            "warning" = "color: orange; font-weight: bold;",
+            "critical" = "color: red; font-weight: bold;",
+            "expired" = "color: red; font-weight: bold;",
+            "color: gray;"
+          )
+
+          bslib::accordion(
+            id = session$ns("account_overview"),
+            open = FALSE,  # Collapsed by default
+            bslib::accordion_panel(
+              title = HTML(paste0(
+                "<span style='font-weight: 600;'>Account Overview</span>",
+                " <span style='color: #666; font-size: 0.9em;'>(",
+                active_account$username,
+                ")</span>"
+              )),
+              icon = icon("user-circle"),
+              div(
+                style = "padding: 10px;",
+                # Username row
+                div(
+                  style = "margin-bottom: 12px; padding: 8px; background-color: #f8f9fa; border-radius: 4px;",
+                  div(
+                    style = "display: flex; align-items: center; gap: 10px;",
+                    icon("user", style = "color: #52B788; font-size: 18px;"),
+                    div(
+                      div(style = "font-size: 11px; color: #666; text-transform: uppercase;", "Username"),
+                      div(style = "font-size: 15px; font-weight: 600;", active_account$username)
+                    )
+                  )
+                ),
+                # Environment row
+                div(
+                  style = "margin-bottom: 12px; padding: 8px; background-color: #f8f9fa; border-radius: 4px;",
+                  div(
+                    style = "display: flex; align-items: center; gap: 10px;",
+                    icon("globe", style = "color: #52B788; font-size: 18px;"),
+                    div(
+                      div(style = "font-size: 11px; color: #666; text-transform: uppercase;", "Environment"),
+                      div(
+                        style = "font-size: 15px; margin-top: 2px;",
+                        tags$span(
+                          style = env_style,
+                          toupper(active_account$environment)
+                        )
+                      )
+                    )
+                  )
+                ),
+                # Token status row
+                div(
+                  style = "margin-bottom: 0; padding: 8px; background-color: #f8f9fa; border-radius: 4px;",
+                  div(
+                    style = "display: flex; align-items: center; gap: 10px;",
+                    token_status$icon,
+                    div(
+                      div(style = "font-size: 11px; color: #666; text-transform: uppercase;", "Token Status"),
+                      div(
+                        style = "font-size: 15px; margin-top: 2px;",
+                        tags$span(style = token_style, token_status$status_text),
+                        tags$span(
+                          style = "color: #666; font-size: 13px; margin-left: 8px;",
+                          paste0("(expires ", token_status$time_remaining, ")")
+                        )
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        } else {
+          NULL  # No accordion when not connected
+        }
+      })
+    }
+
     # Update account selector dropdown
     update_account_selector <- function() {
       choices <- account_manager$get_account_choices()
@@ -186,10 +290,11 @@ mod_ebay_auth_server <- function(id, parent_session = NULL) {
           token_expiry = new_account$token_expiry
         )
         ebay_api(api)
-        
+
         # Update UI
+        update_account_overview()
         update_connection_status()
-        
+
         showNotification(
           paste("Switched to:", new_account$username),
           type = "message"
@@ -216,6 +321,7 @@ mod_ebay_auth_server <- function(id, parent_session = NULL) {
         ebay_api(api)
       }
 
+      update_account_overview()
       update_connection_status()
       update_account_selector()
 
@@ -344,7 +450,14 @@ mod_ebay_auth_server <- function(id, parent_session = NULL) {
         if (result$success) {
           # Get user info
           user_info <- api$oauth$get_user_info()
-          
+
+          # DEBUG: Log what eBay returned
+          cat("\n=== eBay User Info Retrieved ===\n")
+          cat("  User ID:", user_info$user_id, "\n")
+          cat("  Username:", user_info$username, "\n")
+          cat("  Environment:", api$config$environment, "\n")
+          cat("================================\n\n")
+
           if (user_info$success) {
             # Add account to manager
             account_key <- account_manager$add_account(
@@ -365,6 +478,7 @@ mod_ebay_auth_server <- function(id, parent_session = NULL) {
             ebay_api(api)
 
             # Update UI
+            update_account_overview()
             update_connection_status()
             update_account_selector()
           } else {
@@ -449,11 +563,12 @@ mod_ebay_auth_server <- function(id, parent_session = NULL) {
             api <- init_ebay_api()
             ebay_api(api)
           }
-          
+
           # Update UI
+          update_account_overview()
           update_connection_status()
           update_account_selector()
-          
+
           showNotification(
             paste("Disconnected:", username),
             type = "message"

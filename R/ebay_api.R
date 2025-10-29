@@ -87,6 +87,7 @@ EbayOAuth <- R6::R6Class("EbayOAuth",
           "https://api.ebay.com/oauth/api_scope/sell.inventory",  # Inventory API (backup)
           "https://api.ebay.com/oauth/api_scope/sell.account",  # Account info
           "https://api.ebay.com/oauth/api_scope/sell.fulfillment",  # Order fulfillment
+          "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",  # User identity (for username)
           sep = " "
         )
       }
@@ -294,9 +295,10 @@ EbayOAuth <- R6::R6Class("EbayOAuth",
         ))
       }
 
+      cat("\n🔍 Attempting to extract user info from eBay token...\n")
+
       # Try to decode JWT token to extract user info
-      # JWT tokens have 3 parts separated by dots: header.payload.signature
-      tryCatch({
+      jwt_result <- tryCatch({
         # Split token and decode payload (middle part)
         token_parts <- strsplit(token, "\\.")[[1]]
         if (length(token_parts) >= 2) {
@@ -317,30 +319,56 @@ EbayOAuth <- R6::R6Class("EbayOAuth",
           payload_json <- rawToChar(base64decode(payload_encoded))
           payload_data <- jsonlite::fromJSON(payload_json)
 
+          cat("📋 JWT Payload claims found:\n")
+          cat("  ", paste(names(payload_data), collapse = ", "), "\n")
+
           # Extract user info from JWT payload
           # eBay tokens include user_name and user_id in the payload
           user_id <- payload_data$`https://apiz.ebay.com/useridz`
           username <- payload_data$`https://apiz.ebay.com/usernamez`
+
+          cat("  useridz claim:", if (!is.null(user_id)) user_id else "NULL", "\n")
+          cat("  usernamez claim:", if (!is.null(username)) username else "NULL", "\n")
 
           # Fallback to alternative claim names if primary ones don't exist
           if (is.null(user_id)) user_id <- payload_data$user_id
           if (is.null(username)) username <- payload_data$username
           if (is.null(username)) username <- payload_data$sub
 
-          if (!is.null(user_id) || !is.null(username)) {
+          if (!is.null(user_id) && !is.null(username)) {
+            cat("✅ JWT extraction successful!\n")
+            cat("  User ID:", user_id, "\n")
+            cat("  Username:", username, "\n\n")
             return(list(
               success = TRUE,
-              user_id = if (!is.null(user_id)) as.character(user_id) else "unknown",
-              username = if (!is.null(username)) as.character(username) else paste0("user_", substr(user_id, 1, 8))
+              user_id = as.character(user_id),
+              username = as.character(username)
             ))
+          } else {
+            cat("⚠️ JWT extraction incomplete (user_id or username missing)\n")
+            return(NULL)
           }
         }
+        return(NULL)
+      }, error = function(e) {
+        cat("❌ JWT decoding failed:", e$message, "\n")
+        return(NULL)
+      })
 
-        # If JWT decoding fails, fall back to API call
-        user_url <- paste0(
-          private$config$get_base_url(),
-          "/commerce/identity/v1/user/"
-        )
+      # If JWT worked, return it
+      if (!is.null(jwt_result)) {
+        return(jwt_result)
+      }
+
+      # Try API call as fallback
+      cat("🌐 Attempting eBay User API call...\n")
+      api_result <- tryCatch({
+        # IMPORTANT: Identity API uses apiz.ebay.com, not api.ebay.com
+        base_url <- private$config$get_base_url()
+        identity_url <- gsub("^https://api\\.", "https://apiz.", base_url)
+        user_url <- paste0(identity_url, "/commerce/identity/v1/user")
+
+        cat("  URL:", user_url, "\n")
 
         response <- request(user_url) |>
           req_headers("Authorization" = paste("Bearer", token)) |>
@@ -348,26 +376,41 @@ EbayOAuth <- R6::R6Class("EbayOAuth",
 
         user_data <- resp_body_json(response)
 
+        cat("✅ API call successful!\n")
+        cat("  API response fields:", paste(names(user_data), collapse = ", "), "\n")
+
+        # Extract userId and username from response
+        user_id <- if (!is.null(user_data$userId)) user_data$userId else user_data$user_id
+        username <- if (!is.null(user_data$username)) user_data$username else user_data$userName
+
+        cat("  User ID:", user_id, "\n")
+        cat("  Username:", username, "\n\n")
+
         return(list(
           success = TRUE,
-          user_id = user_data$userId,
-          username = user_data$username
+          user_id = user_id,
+          username = username
         ))
 
       }, error = function(e) {
-        # If all else fails, generate user info from token
-        cat("⚠️ Could not fetch user info from API or JWT, using fallback\n")
-        cat("   Error:", e$message, "\n")
-
-        # Generate a user identifier from the token hash
-        token_hash <- substr(digest::digest(token, algo = "md5"), 1, 8)
-
-        return(list(
-          success = TRUE,
-          user_id = paste0("ebay_user_", token_hash),
-          username = paste0("eBay_", private$config$environment, "_", token_hash)
-        ))
+        cat("❌ API call failed:", e$message, "\n\n")
+        return(NULL)
       })
+
+      # If API worked, return it
+      if (!is.null(api_result)) {
+        return(api_result)
+      }
+
+      # Last resort fallback - generate from token hash
+      cat("⚠️ All methods failed - using generated fallback username\n")
+      token_hash <- substr(digest::digest(token, algo = "md5"), 1, 8)
+
+      return(list(
+        success = TRUE,
+        user_id = paste0("ebay_user_", token_hash),
+        username = paste0("eBay_", private$config$environment, "_", token_hash)
+      ))
     },
 
     # Inject stored tokens (for account switching)

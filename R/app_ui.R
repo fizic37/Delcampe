@@ -81,7 +81,7 @@ app_ui <- function(request) {
         title = "Stamps",
         icon = icon("stamp"),
         value = "stamps",
-        
+
         bslib::page_fillable(
           padding = 20,
           bslib::card(
@@ -94,19 +94,19 @@ app_ui <- function(request) {
               icon("stamp", style = "font-size: 48px; color: #6c757d; margin-bottom: 20px;"),
               h4("Coming Soon!", style = "color: #495057; margin-bottom: 15px;"),
               p("The Stamps feature is under development.", style = "color: #6c757d; font-size: 16px;"),
-              p("This section will allow you to process stamp collections separately from postal cards.", 
+              p("This section will allow you to process stamp collections separately from postal cards.",
                 style = "color: #6c757d; font-size: 14px; margin-top: 10px;")
             )
           )
         )
       ),
 
-      # Settings Tab
+      # Settings Tab (with eBay Connection back inside)
       bslib::nav_panel(
         "Settings",
         icon = icon("cog"),
 
-        # Settings content
+        # Settings content with eBay as subtab
         bslib::navset_card_tab(
           bslib::nav_panel(
             title = "General",
