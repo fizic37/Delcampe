@@ -23,6 +23,8 @@ inst/app/data/uploads-cards-verso/*.jpg
 inst/app/data/tracking.sqlite
 inst/app/data/tracking.sqlite-shm
 inst/app/data/tracking.sqlite-wal
+inst/app/data/crops/
+inst/app/data/ebay_accounts.rds
 
 # Test outputs
 test_images/extracted/
@@ -60,4 +62,8 @@ coverage-report.html
 .Renviron
 Ebay_Credentials.*
 data/ebay_tokens.rds
+data/ebay_tokens.rds.backup
 data/ebay_app_token.rds
+
+# Local settings
+.claude/settings.local.json
