@@ -18,6 +18,70 @@ mod_delcampe_export_ui <- function(id) {
   )
 }
 
+# Standard description template constant
+STANDARD_DESCRIPTION_TEMPLATE <- "THIS ITEM IS SOLD AS IT IS PLEASE LOOK CAREFULLY AT THE PHOTOS!!! - All items are part of my private collection. Your satisfaction is guaranteed, full refund if the item is not as described.
+
+AT THE MOMENT ROMANIAN POST DOES NOT SEND ITEMS IN UKRAINE, BELARUS AND RUSSIAN FEDERATION SO I WILL NOT BE ABLE TO COMPLETE ORDERS FROM THIS COUNTRIES UNLESS YOU HAVE A SECOND SHIPPING ADDRESS IN OTHER COUNTRY.
+
+
+Shipping rates worldwide (economy, not registered):
+
+
+ 50 - 100g     - 4$
+100 - 500g    - 7$
+500 - 1000g  - 10$
+
+For registered shipping there is an extra 2$ to be added. If you want registered shipping, please let me know after the auction is finished. I am not responsible for any items lost or stolen in shipments that are not registered."
+
+#' Build template description from title and standard text
+#' @param title Character string with extracted title
+#' @return Character string with formatted description
+build_template_description <- function(title) {
+  # Use fallback if title is empty
+  if (is.null(title) || trimws(title) == "") {
+    title <- "Vintage Postcard"
+  }
+
+  # Concatenate title + standard template
+  paste(title, STANDARD_DESCRIPTION_TEMPLATE, sep = "\n\n")
+}
+
+#' Sort images so lot cards combined images appear first
+#' @param image_paths Character vector of image paths
+#' @return Sorted character vector
+sort_images_lot_first <- function(image_paths) {
+  if (length(image_paths) == 0) {
+    return(image_paths)
+  }
+
+  # Define priority order
+  priority_order <- data.frame(
+    path = image_paths,
+    priority = sapply(image_paths, function(path) {
+      # Lot images: lot_column_X.jpg or lot_row_X_col_Y.jpg
+      if (grepl("lot_column", path, ignore.case = TRUE) || grepl("lot_row", path, ignore.case = TRUE)) {
+        return(1)  # Lot images first
+      }
+      # Combined face+verso images: combined_rowX_colY.jpg
+      if (grepl("combined_row", path, ignore.case = TRUE) || grepl("combined", path, ignore.case = TRUE)) {
+        return(2)  # Combined images second
+      }
+      return(3)  # Everything else
+    }),
+    stringsAsFactors = FALSE
+  )
+
+  # Sort by priority first, then alphabetically within priority
+  priority_order <- priority_order[order(priority_order$priority, priority_order$path), ]
+
+  cat("📋 Image ordering:\n")
+  cat("   Lot images (lot_column/lot_row):", sum(priority_order$priority == 1), "\n")
+  cat("   Combined images (combined_row):", sum(priority_order$priority == 2), "\n")
+  cat("   Other images:", sum(priority_order$priority == 3), "\n")
+
+  return(priority_order$path)
+}
+
 #' Delcampe Export Server Functions
 #'
 #' @param image_paths Reactive containing vector of image web URLs
@@ -48,7 +112,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
     output$accordion_container <- renderUI({
       req(image_paths())
       paths <- image_paths()
-      
+
       if (length(paths) == 0) {
         return(div(
           style = "padding: 40px; text-align: center; color: #868e96;",
@@ -57,19 +121,28 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           p("Process some images first to export them to eBay.")
         ))
       }
-      
-      # Create accordion panels for each image
-      panels <- lapply(seq_along(paths), function(i) {
-        create_accordion_panel(i, paths[i])
+
+      # Sort images so lot cards appear first
+      sorted_paths <- sort_images_lot_first(paths)
+
+      # Create accordion panels for each image (using sorted paths)
+      panels <- lapply(seq_along(sorted_paths), function(i) {
+        create_accordion_panel(i, sorted_paths[i])
       })
-      
-      # Use bslib::accordion with open = FALSE to start collapsed
-      # multiple = FALSE means only one panel can be open at a time (auto-collapse)
-      bslib::accordion(
-        id = ns("export_accordion"),
-        open = FALSE,  # All closed by default
-        multiple = FALSE,  # Auto-collapse: only one open at a time
-        !!!panels  # Splice in the list of panels
+
+      # Wrap accordion in full-width container
+      div(
+        class = "container-fluid",
+        style = "padding: 0; margin: 0; width: 100%;",
+
+        # Use bslib::accordion with open = FALSE to start collapsed
+        # multiple = FALSE means only one panel can be open at a time (auto-collapse)
+        bslib::accordion(
+          id = ns("export_accordion"),
+          open = FALSE,  # All closed by default
+          multiple = FALSE,  # Auto-collapse: only one open at a time
+          !!!panels  # Splice in the list of panels
+        )
       )
     })
     
@@ -144,18 +217,19 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
     create_form_content <- function(idx, path) {
       div(
         style = "padding: 20px;",
-        
+
+        # Row 1: Image preview (4 cols) + AI Controls (8 cols)
         fluidRow(
-          # Left: Image preview (width 6)
+          # Image preview
           column(
-            6,
+            4,
             div(
               style = "text-align: center;",
               actionLink(
                 ns(paste0("enlarge_img_", idx)),
                 tags$img(
                   src = path,
-                  style = "width: 100%; max-height: 300px; object-fit: contain; border-radius: 8px; border: 1px solid #dee2e6; cursor: pointer;"
+                  style = "width: 100%; max-height: 250px; object-fit: contain; border-radius: 8px; border: 1px solid #dee2e6; cursor: pointer;"
                 )
               ),
               div(
@@ -164,25 +238,41 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
               )
             )
           ),
-          
-          # Right: AI controls (width 6)
+
+          # AI controls
           column(
-            6,
+            8,
             div(
               style = "padding: 16px; background: #f1f3f5; border-radius: 6px; border-left: 4px solid #4c6ef5; height: 100%;",
-              h5(icon("robot"), " AI Assistant", style = "margin-top: 0;"),
-              selectInput(
-                ns(paste0("ai_model_", idx)),
-                "Model",
-                choices = c("Claude" = "claude", "GPT-4" = "gpt4"),
-                selected = "claude",
-                width = "100%"
+              h5(icon("robot"), " AI Assistant", style = "margin-top: 0; margin-bottom: 16px;"),
+              fluidRow(
+                column(
+                  6,
+                  selectInput(
+                    ns(paste0("ai_model_", idx)),
+                    "Model",
+                    choices = c("Claude" = "claude", "GPT-4" = "gpt4"),
+                    selected = "claude",
+                    width = "100%"
+                  )
+                ),
+                column(
+                  6,
+                  div(
+                    style = "padding-top: 5px;",
+                    checkboxInput(
+                      ns(paste0("fetch_ai_description_", idx)),
+                      "Fetch AI description",
+                      value = FALSE
+                    )
+                  )
+                )
               ),
               uiOutput(ns(paste0("ai_button_", idx)))
             )
           )
         ),
-        
+
         # AI Status output (width 12)
         fluidRow(
           column(
@@ -190,56 +280,21 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
             uiOutput(ns(paste0("ai_status_", idx)))
           )
         ),
-        
-        # Title (width 12)
+
+        # Row 2: Title (8 cols) + Price (2 cols) + Condition (2 cols)
         fluidRow(
           column(
-            12,
+            8,
             textAreaInput(
               ns(paste0("item_title_", idx)),
               "Title *",
               rows = 2,
-              placeholder = "Enter listing title...",
+              placeholder = "Enter listing title (max 80 characters)...",
               width = "100%"
             )
-          )
-        ),
-        
-        # Description (width 12)
-        fluidRow(
+          ),
           column(
-            12,
-            textAreaInput(
-              ns(paste0("item_description_", idx)),
-              "Description *",
-              rows = 6,
-              placeholder = "Enter detailed description...",
-              width = "100%"
-            )
-          )
-        ),
-        
-        # Listing Type (width 12) - NEW
-        fluidRow(
-          column(
-            12,
-            selectInput(
-              ns(paste0("listing_type_", idx)),
-              "Listing Type *",
-              choices = c(
-                "Auction" = "auction",
-                "Buy It Now (Fixed Price)" = "fixed_price"
-              ),
-              selected = "auction",  # Default to auction per user request
-              width = "100%"
-            )
-          )
-        ),
-
-        # Price and Condition (width 6 each)
-        fluidRow(
-          column(
-            6,
+            2,
             numericInput(
               ns(paste0("starting_price_", idx)),
               "Price (€) *",
@@ -250,7 +305,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
             )
           ),
           column(
-            6,
+            2,
             selectInput(
               ns(paste0("condition_", idx)),
               "Condition *",
@@ -270,12 +325,40 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           )
         ),
 
-        # Auction Duration (conditional - shown only for auctions)
-        conditionalPanel(
-          condition = sprintf("input['%s'] == 'auction'", ns(paste0("listing_type_", idx))),
-          fluidRow(
-            column(
-              12,
+        # Row 3: Description (full width)
+        fluidRow(
+          column(
+            12,
+            textAreaInput(
+              ns(paste0("item_description_", idx)),
+              "Description *",
+              rows = 6,
+              placeholder = "Enter detailed description...",
+              width = "100%"
+            )
+          )
+        ),
+
+        # Row 4: Listing Type (4 cols) + Auction Duration (4 cols) + Buy It Now (4 cols)
+        fluidRow(
+          column(
+            4,
+            selectInput(
+              ns(paste0("listing_type_", idx)),
+              "Listing Type *",
+              choices = c(
+                "Auction" = "auction",
+                "Buy It Now (Fixed Price)" = "fixed_price"
+              ),
+              selected = "auction",
+              width = "100%"
+            )
+          ),
+          # Auction Duration (conditional - shown only for auctions)
+          column(
+            4,
+            conditionalPanel(
+              condition = sprintf("input['%s'] == 'auction'", ns(paste0("listing_type_", idx))),
               selectInput(
                 ns(paste0("auction_duration_", idx)),
                 "Auction Duration *",
@@ -285,22 +368,19 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
                   "7 Days" = "Days_7",
                   "10 Days" = "Days_10"
                 ),
-                selected = "Days_7",  # Most common for vintage items
+                selected = "Days_7",
                 width = "100%"
               )
             )
-          )
-        ),
-
-        # Buy It Now Price (conditional - shown only for auctions)
-        conditionalPanel(
-          condition = sprintf("input['%s'] == 'auction'", ns(paste0("listing_type_", idx))),
-          fluidRow(
-            column(
-              12,
+          ),
+          # Buy It Now Price (conditional - shown only for auctions)
+          column(
+            4,
+            conditionalPanel(
+              condition = sprintf("input['%s'] == 'auction'", ns(paste0("listing_type_", idx))),
               numericInput(
                 ns(paste0("buy_it_now_price_", idx)),
-                "Buy It Now Price (€) - Optional (must be 30%+ higher)",
+                "Buy It Now (€) - Optional",
                 value = NA,
                 min = 0,
                 step = 0.50,
@@ -310,32 +390,25 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           )
         ),
 
-        # Reserve Price (conditional - shown only for auctions)
-        conditionalPanel(
-          condition = sprintf("input['%s'] == 'auction'", ns(paste0("listing_type_", idx))),
-          fluidRow(
-            column(
-              12,
+        # Row 5: Reserve Price (4 cols) + Year (4 cols) + Era (4 cols)
+        fluidRow(
+          # Reserve Price (conditional - shown only for auctions)
+          column(
+            4,
+            conditionalPanel(
+              condition = sprintf("input['%s'] == 'auction'", ns(paste0("listing_type_", idx))),
               numericInput(
                 ns(paste0("reserve_price_", idx)),
-                "Reserve Price (€) - Optional (minimum to sell)",
+                "Reserve (€) - Optional",
                 value = NA,
                 min = 0,
                 step = 0.50,
                 width = "100%"
               )
             )
-          )
-        ),
-
-        # eBay Metadata Section
-        tags$hr(style = "margin-top: 20px; margin-bottom: 10px;"),
-        tags$h5("eBay Metadata (Optional)", style = "margin-bottom: 10px; color: #495057;"),
-
-        # Year and Era (width 6 each)
-        fluidRow(
+          ),
           column(
-            6,
+            4,
             textInput(
               ns(paste0("year_", idx)),
               "Year",
@@ -344,7 +417,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
             )
           ),
           column(
-            6,
+            4,
             selectInput(
               ns(paste0("era_", idx)),
               "Era",
@@ -361,10 +434,14 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           )
         ),
 
-        # City and Country (width 6 each)
+        # eBay Metadata Section Header
+        tags$hr(style = "margin-top: 20px; margin-bottom: 10px;"),
+        tags$h5("eBay Metadata (Optional)", style = "margin-bottom: 10px; color: #495057;"),
+
+        # Row 6: City (4 cols) + Country (4 cols) + Region (4 cols)
         fluidRow(
           column(
-            6,
+            4,
             textInput(
               ns(paste0("city_", idx)),
               "City",
@@ -373,20 +450,16 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
             )
           ),
           column(
-            6,
+            4,
             textInput(
               ns(paste0("country_", idx)),
               "Country",
               placeholder = "e.g., Romania",
               width = "100%"
             )
-          )
-        ),
-
-        # Region (width 12)
-        fluidRow(
+          ),
           column(
-            12,
+            4,
             textInput(
               ns(paste0("region_", idx)),
               "Region/County",
@@ -396,7 +469,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           )
         ),
 
-        # Theme Keywords (width 12)
+        # Row 7: Theme Keywords (full width)
         fluidRow(
           column(
             12,
@@ -592,6 +665,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
       cat("\n=== PRE-LOADING AI DATA FROM DATABASE ===\n")
       cat("   Number of images:", length(paths), "\n")
 
+      # Load AI data for each path - use path as key, not index
       ai_data_list <- lapply(seq_along(paths), function(i) {
         cat("\n   --- Checking image", i, "for existing AI data ---\n")
         cat("      Web path:", paths[i], "\n")
@@ -669,6 +743,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           # Return the AI data for this image
           return(list(
             index = i,
+            path = paths[i],  # Include path for matching after sorting
             has_data = TRUE,
             ai_title = existing$ai_title,
             ai_description = existing$ai_description,
@@ -684,7 +759,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           ))
         } else {
           cat("   ℹ️ No existing AI data found for image", i, "\n")
-          return(list(index = i, has_data = FALSE))
+          return(list(index = i, path = paths[i], has_data = FALSE))
         }
       })
 
@@ -708,12 +783,36 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
       panel_match <- regexpr("panel_(\\d+)", opened_panel, perl = TRUE)
       if (panel_match > 0) {
         i <- as.integer(sub("panel_", "", opened_panel))
-        cat("   Image index:", i, "\n")
+        cat("   Panel index (sorted):", i, "\n")
 
-        # Get AI data for this image
+        # Get sorted paths to find which image this panel represents
+        paths <- image_paths()
+        sorted_paths <- sort_images_lot_first(paths)
+
+        if (i > length(sorted_paths)) {
+          cat("   ⚠️ Panel index out of range\n")
+          return()
+        }
+
+        current_path <- sorted_paths[i]
+        cat("   Current path:", current_path, "\n")
+
+        # Find AI data by matching path (not by index!)
         ai_data_list <- existing_ai_data()
-        if (!is.null(ai_data_list) && i <= length(ai_data_list)) {
-          ai_data <- ai_data_list[[i]]
+        ai_data <- NULL
+
+        if (!is.null(ai_data_list)) {
+          # Search for matching path in AI data list
+          for (data_item in ai_data_list) {
+            if (!is.null(data_item) && !is.null(data_item$path) && data_item$path == current_path) {
+              ai_data <- data_item
+              cat("   ✅ Found AI data by path matching\n")
+              break
+            }
+          }
+        }
+
+        if (!is.null(ai_data)) {
 
           if (!is.null(ai_data) && isTRUE(ai_data$has_data)) {
             cat("   ✨ Found AI data for image", i, "- populating fields with delay\n")
@@ -806,19 +905,28 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
       req(image_paths())
       req(existing_ai_data())  # Wait for AI data to be loaded
       paths <- image_paths()
+      sorted_paths <- sort_images_lot_first(paths)
       ai_data_list <- existing_ai_data()
 
-      lapply(seq_along(paths), function(i) {
+      lapply(seq_along(sorted_paths), function(i) {
+        current_path <- sorted_paths[i]
+
         output[[paste0("ai_button_", i)]] <- renderUI({
           button_label <- "Extract with AI"
           button_icon <- icon("wand-magic-sparkles")
           button_class <- "btn-primary"
 
-          # Check if this image has existing AI data (duplicate)
-          has_existing_data <- !is.null(ai_data_list) &&
-                              i <= length(ai_data_list) &&
-                              !is.null(ai_data_list[[i]]) &&
-                              isTRUE(ai_data_list[[i]]$has_data)
+          # Find AI data by matching path (not by index!)
+          has_existing_data <- FALSE
+          if (!is.null(ai_data_list)) {
+            for (data_item in ai_data_list) {
+              if (!is.null(data_item) && !is.null(data_item$path) &&
+                  data_item$path == current_path && isTRUE(data_item$has_data)) {
+                has_existing_data <- TRUE
+                break
+              }
+            }
+          }
 
           if (has_existing_data) {
             # This is a duplicate with existing AI data
@@ -842,11 +950,15 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
     observe({
       req(image_paths())
       paths <- image_paths()
-      
-      lapply(seq_along(paths), function(i) {
+      sorted_paths <- sort_images_lot_first(paths)
+
+      lapply(seq_along(sorted_paths), function(i) {
         observeEvent(input[[paste0("extract_ai_", i)]], ignoreNULL = TRUE, ignoreInit = TRUE, {
 
           cat("\n🎯 Extract AI button clicked for image", i, "\n")
+
+          # Get checkbox state for description fetching
+          fetch_description <- input[[paste0("fetch_ai_description_", i)]] %||% FALSE
 
           # Show notification
           notification_id <- showNotification(
@@ -856,12 +968,13 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
             type = "message"
           )
 
-          # Get current path and model
-          current_path <- paths[i]
+          # Get current path from sorted paths
+          current_path <- sorted_paths[i]
           selected_model <- input[[paste0("ai_model_", i)]] %||% "claude"
 
           cat("   Path:", current_path, "\n")
           cat("   Model:", selected_model, "\n")
+          cat("   Fetch AI description:", fetch_description, "\n")
 
           # Get LLM config
           config <- get_llm_config()
@@ -1005,9 +1118,17 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
                   shiny::updateTextAreaInput(session, paste0("item_title_", i), value = parsed$title)
                   cat("      Title updated (length:", nchar(parsed$title), ")\n")
 
-                  # Update description
-                  shiny::updateTextAreaInput(session, paste0("item_description_", i), value = parsed$description)
-                  cat("      Description updated (length:", nchar(parsed$description), ")\n")
+                  # CONDITIONAL: Update description based on checkbox
+                  if (fetch_description) {
+                    # AI-generated description
+                    shiny::updateTextAreaInput(session, paste0("item_description_", i), value = parsed$description)
+                    cat("      Description updated with AI content (length:", nchar(parsed$description), ")\n")
+                  } else {
+                    # Template-based description
+                    template_description <- build_template_description(parsed$title)
+                    shiny::updateTextAreaInput(session, paste0("item_description_", i), value = template_description)
+                    cat("      Description updated with template (length:", nchar(template_description), ")\n")
+                  }
 
                   updateNumericInput(session, paste0("starting_price_", i), value = parsed$price)
                   cat("      Price updated\n")
@@ -1306,8 +1427,9 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
     observe({
       req(image_paths())
       paths <- image_paths()
+      sorted_paths <- sort_images_lot_first(paths)
 
-      lapply(seq_along(paths), function(i) {
+      lapply(seq_along(sorted_paths), function(i) {
         observeEvent(input[[paste0("send_to_ebay_", i)]], ignoreNULL = TRUE, ignoreInit = TRUE, {
           # Get form inputs
           title <- input[[paste0("item_title_", i)]]
@@ -1394,6 +1516,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
     observe({
       req(image_paths())
       paths <- image_paths()
+      sorted_paths <- sort_images_lot_first(paths)
 
       # Get file paths - may be NULL for some image types
       file_paths <- if (!is.null(image_file_paths)) {
@@ -1402,7 +1525,17 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
         NULL
       }
 
-      lapply(seq_along(paths), function(i) {
+      # Sort file_paths to match sorted_paths order
+      sorted_file_paths <- if (!is.null(file_paths)) {
+        # Create a mapping from original paths to file paths
+        path_to_file <- setNames(file_paths, paths)
+        # Map sorted paths to file paths
+        sapply(sorted_paths, function(p) path_to_file[[p]])
+      } else {
+        NULL
+      }
+
+      lapply(seq_along(sorted_paths), function(i) {
         button_id <- paste0("confirm_send_to_ebay_", i)
 
         observeEvent(input[[button_id]], ignoreNULL = TRUE, ignoreInit = TRUE, {
@@ -1488,12 +1621,12 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
             theme_keywords = theme_keywords
           )
 
-          # Get image file path
-          image_file <- if (!is.null(file_paths) && i <= length(file_paths)) {
-            file_paths[i]
+          # Get image file path (using sorted arrays)
+          image_file <- if (!is.null(sorted_file_paths) && i <= length(sorted_file_paths)) {
+            sorted_file_paths[i]
           } else {
             # Fallback to web path conversion for lot images
-            convert_web_path_to_file_path(paths[i])
+            convert_web_path_to_file_path(sorted_paths[i])
           }
 
           # Call listing creation function with progress callback
@@ -1580,13 +1713,14 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
     observe({
       req(image_paths())
       paths <- image_paths()
+      sorted_paths <- sort_images_lot_first(paths)
 
-      lapply(seq_along(paths), function(i) {
+      lapply(seq_along(sorted_paths), function(i) {
         observeEvent(input[[paste0("enlarge_img_", i)]], ignoreNULL = TRUE, ignoreInit = TRUE, {
           showModal(modalDialog(
             title = paste0(tools::toTitleCase(image_type), " Image ", i),
             tags$img(
-              src = paths[i],
+              src = sorted_paths[i],
               style = "width: 100%; height: auto; max-height: 80vh; object-fit: contain;"
             ),
             easyClose = TRUE,

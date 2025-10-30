@@ -935,14 +935,16 @@ app_server <- function(input, output, session) {
           style = "padding: 20px;",
           fluidRow(
             column(
-              width = 6,
+              width = 12,
               h5("📦 Postal Card Lots", style = "margin-bottom: 15px; color: #495057;"),
-              p("Export complete lots (vertical stacks by column)", 
+              p("Export complete lots (vertical stacks by column)",
                 style = "font-size: 13px; color: #666; margin-bottom: 15px;"),
               mod_delcampe_export_ui("lot_export")
-            ),
+            )
+          ),
+          fluidRow(
             column(
-              width = 6, 
+              width = 12,
               h5("🖼️ Individual Combined Images", style = "margin-bottom: 15px; color: #495057;"),
               p("Export individual face+verso pairs",
                 style = "font-size: 13px; color: #666; margin-bottom: 15px;"),
