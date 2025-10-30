@@ -13,7 +13,19 @@ This directory contains persistent context and solutions for the Delcampe projec
 - **task_completion_procedures.md** - How to complete tasks properly
 - **suggested_commands.md** - Useful commands and workflows
 
-### Latest Session (October 29, 2025)
+### Latest Session (October 30, 2025)
+
+- ✅ **ebay_title_extraction_optimization_20251030.md** - ⭐ EBAY-OPTIMIZED TITLE EXTRACTION
+  - Updated AI extraction prompts to generate professional eBay postal history titles
+  - Format: ALL UPPERCASE, dash-separated, keyword-optimized for eBay search
+  - Pattern: COUNTRY - YEAR TYPE LOCATION FEATURES (max 80 chars)
+  - Applied to all 3 extraction types (individual, combined, lot)
+  - Examples: "AUSTRIA - 1912 PARCEL POST ROMANIA REICHENBERG PERFIN REVENUE"
+  - File: R/ai_api_helpers.R (build_enhanced_postal_card_prompt function)
+  - Status: ✅ IMPLEMENTED - Ready for production testing
+  - PRP: PRPs/PRP_EBAY_TITLE_EXTRACTION_OPTIMIZATION.md
+
+### Previous Session (October 29, 2025)
 
 - ✅ **ebay_auction_support_complete_20251029.md** - ⭐ AUCTION LISTING SUPPORT - CRITICAL FEATURE
   - Complete auction listing support for eBay (user's #1 requested feature)
