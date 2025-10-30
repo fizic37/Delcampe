@@ -14,7 +14,11 @@ create_ebay_listing_from_card(
   image_url = NULL,
   ebay_user_id = NULL,
   ebay_username = NULL,
-  progress_callback = NULL
+  progress_callback = NULL,
+  listing_type = "fixed_price",
+  listing_duration = "GTC",
+  buy_it_now_price = NULL,
+  reserve_price = NULL
 )
 }
 \arguments{
@@ -34,6 +38,14 @@ create_ebay_listing_from_card(
 
 \item{progress_callback}{Optional callback function(message, value) to report progress.
 Called at key stages with message (string) and value (0.0 to 1.0).}
+
+\item{listing_type}{Listing type: "auction" or "fixed_price" (default: "fixed_price")}
+
+\item{listing_duration}{Listing duration: "Days_3", "Days_5", "Days_7", "Days_10", or "GTC" (default: "GTC")}
+
+\item{buy_it_now_price}{Buy It Now price for auctions (optional)}
+
+\item{reserve_price}{Reserve price for auctions (optional)}
 }
 \value{
 List with success status, listing_id, offer_id, sku, listing_url

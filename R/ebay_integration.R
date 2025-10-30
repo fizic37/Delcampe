@@ -16,16 +16,28 @@
 #' @return List with success status, listing_id, offer_id, sku, listing_url
 #' @param progress_callback Optional callback function(message, value) to report progress.
 #'   Called at key stages with message (string) and value (0.0 to 1.0).
+#' @param listing_type Listing type: "auction" or "fixed_price" (default: "fixed_price")
+#' @param listing_duration Listing duration: "Days_3", "Days_5", "Days_7", "Days_10", or "GTC" (default: "GTC")
+#' @param buy_it_now_price Buy It Now price for auctions (optional)
+#' @param reserve_price Reserve price for auctions (optional)
 #'
 #' @export
 create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id,
                                           image_url = NULL, ebay_user_id = NULL, ebay_username = NULL,
-                                          progress_callback = NULL) {
+                                          progress_callback = NULL, listing_type = "fixed_price",
+                                          listing_duration = "GTC", buy_it_now_price = NULL,
+                                          reserve_price = NULL) {
 
   cat("\n=== CREATING EBAY LISTING (Trading API) ===\n")
   cat("   Card ID:", card_id, "\n")
   cat("   Session:", session_id, "\n")
   cat("   eBay User:", ebay_username %||% "None", "\n")
+  cat("   Listing Type:", listing_type, "\n")
+  if (listing_type == "auction") {
+    cat("   Duration:", listing_duration, "\n")
+    if (!is.null(buy_it_now_price)) cat("   Buy It Now:", buy_it_now_price, "\n")
+    if (!is.null(reserve_price)) cat("   Reserve:", reserve_price, "\n")
+  }
 
   # Step 1: Validate required fields
   cat("\n1. Validating required fields...\n")
@@ -101,15 +113,36 @@ create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id
     location = location_text
   )
 
-  cat("   Title:", item_data$title, "\n")
-  cat("   Country:", item_data$country, "\n")
-  cat("   Price:", item_data$price, "USD\n")
+  # Add auction-specific fields if listing_type is auction
+  if (listing_type == "auction") {
+    item_data$listing_type <- "auction"
+    item_data$listing_duration <- listing_duration
+    item_data$start_price <- ai_data$price  # Starting bid
+    item_data$buy_it_now_price <- buy_it_now_price
+    item_data$reserve_price <- reserve_price
 
-  # Step 5: Create listing via Trading API
+    cat("   Title:", item_data$title, "\n")
+    cat("   Country:", item_data$country, "\n")
+    cat("   Starting Bid:", item_data$start_price, "USD\n")
+    cat("   Duration:", item_data$listing_duration, "\n")
+  } else {
+    item_data$listing_type <- "fixed_price"
+    item_data$listing_duration <- "GTC"
+
+    cat("   Title:", item_data$title, "\n")
+    cat("   Country:", item_data$country, "\n")
+    cat("   Price:", item_data$price, "USD\n")
+  }
+
+  # Step 5: Create listing via Trading API (route based on listing type)
   cat("\n5. Creating listing via Trading API...\n")
   if (!is.null(progress_callback)) progress_callback("Creating eBay listing...", 0.8)
 
-  result <- ebay_api$trading$add_fixed_price_item(item_data)
+  if (listing_type == "auction") {
+    result <- ebay_api$trading$add_auction_item(item_data)
+  } else {
+    result <- ebay_api$trading$add_fixed_price_item(item_data)
+  }
 
   if (!result$success) {
     cat("   \u274c Trading API failed:", result$error, "\n")
@@ -138,7 +171,11 @@ create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id
     environment = ebay_api$config$environment,
     ebay_user_id = ebay_user_id,
     ebay_username = ebay_username,
-    api_type = "trading"  # NEW FIELD
+    api_type = "trading",  # Trading API
+    listing_type = listing_type,  # Auction or fixed_price
+    listing_duration = listing_duration,  # Duration
+    buy_it_now_price = buy_it_now_price,  # Buy It Now (optional)
+    reserve_price = reserve_price  # Reserve (optional)
   )
 
   if (!save_success) {

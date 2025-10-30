@@ -23,6 +23,7 @@ Used for cross-border listings where Inventory API fails to support Item.Country
 \item \href{#method-EbayTradingAPI-add_fixed_price_item}{\code{EbayTradingAPI$add_fixed_price_item()}}
 \item \href{#method-EbayTradingAPI-upload_image}{\code{EbayTradingAPI$upload_image()}}
 \item \href{#method-EbayTradingAPI-verify_add_item}{\code{EbayTradingAPI$verify_add_item()}}
+\item \href{#method-EbayTradingAPI-add_auction_item}{\code{EbayTradingAPI$add_auction_item()}}
 \item \href{#method-EbayTradingAPI-clone}{\code{EbayTradingAPI$clone()}}
 }
 }
@@ -103,6 +104,26 @@ Verify listing without creating (optional validation)
 }
 \subsection{Returns}{
 List with success, errors/warnings
+}
+}
+\if{html}{\out{<hr>}}
+\if{html}{\out{<a id="method-EbayTradingAPI-add_auction_item"></a>}}
+\if{latex}{\out{\hypertarget{method-EbayTradingAPI-add_auction_item}{}}}
+\subsection{Method \code{add_auction_item()}}{
+Add auction listing (Chinese auction format)
+\subsection{Usage}{
+\if{html}{\out{<div class="r">}}\preformatted{EbayTradingAPI$add_auction_item(item_data)}\if{html}{\out{</div>}}
+}
+
+\subsection{Arguments}{
+\if{html}{\out{<div class="arguments">}}
+\describe{
+\item{\code{item_data}}{List with: title, description, country, location, category_id, start_price, condition_id, quantity=1, images, aspects, listing_duration, buy_it_now_price (optional), reserve_price (optional)}
+}
+\if{html}{\out{</div>}}
+}
+\subsection{Returns}{
+List with success, item_id, error
 }
 }
 \if{html}{\out{<hr>}}

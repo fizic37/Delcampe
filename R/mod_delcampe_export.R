@@ -219,6 +219,23 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           )
         ),
         
+        # Listing Type (width 12) - NEW
+        fluidRow(
+          column(
+            12,
+            selectInput(
+              ns(paste0("listing_type_", idx)),
+              "Listing Type *",
+              choices = c(
+                "Auction" = "auction",
+                "Buy It Now (Fixed Price)" = "fixed_price"
+              ),
+              selected = "auction",  # Default to auction per user request
+              width = "100%"
+            )
+          )
+        ),
+
         # Price and Condition (width 6 each)
         fluidRow(
           column(
@@ -249,6 +266,64 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
               ),
               selected = "used",
               width = "100%"
+            )
+          )
+        ),
+
+        # Auction Duration (conditional - shown only for auctions)
+        conditionalPanel(
+          condition = sprintf("input['%s'] == 'auction'", ns(paste0("listing_type_", idx))),
+          fluidRow(
+            column(
+              12,
+              selectInput(
+                ns(paste0("auction_duration_", idx)),
+                "Auction Duration *",
+                choices = c(
+                  "3 Days" = "Days_3",
+                  "5 Days" = "Days_5",
+                  "7 Days" = "Days_7",
+                  "10 Days" = "Days_10"
+                ),
+                selected = "Days_7",  # Most common for vintage items
+                width = "100%"
+              )
+            )
+          )
+        ),
+
+        # Buy It Now Price (conditional - shown only for auctions)
+        conditionalPanel(
+          condition = sprintf("input['%s'] == 'auction'", ns(paste0("listing_type_", idx))),
+          fluidRow(
+            column(
+              12,
+              numericInput(
+                ns(paste0("buy_it_now_price_", idx)),
+                "Buy It Now Price (€) - Optional (must be 30%+ higher)",
+                value = NA,
+                min = 0,
+                step = 0.50,
+                width = "100%"
+              )
+            )
+          )
+        ),
+
+        # Reserve Price (conditional - shown only for auctions)
+        conditionalPanel(
+          condition = sprintf("input['%s'] == 'auction'", ns(paste0("listing_type_", idx))),
+          fluidRow(
+            column(
+              12,
+              numericInput(
+                ns(paste0("reserve_price_", idx)),
+                "Reserve Price (€) - Optional (minimum to sell)",
+                value = NA,
+                min = 0,
+                step = 0.50,
+                width = "100%"
+              )
             )
           )
         ),
@@ -355,10 +430,23 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
 
     # Helper function to show eBay confirmation modal
     # idx: Image index for unique button identification
-    show_ebay_confirmation_modal <- function(idx, title, price, condition, category = "Postcards") {
+    show_ebay_confirmation_modal <- function(idx, title, price, condition, category = "Postcards",
+                                             listing_type = "fixed_price", duration = "GTC",
+                                             buy_it_now = NULL, reserve = NULL) {
       button_id <- ns(paste0("confirm_send_to_ebay_", idx))
 
       cat("   Creating modal with button ID:", button_id, "\n")
+
+      # Format listing type display
+      type_label <- if (listing_type == "auction") {
+        duration_friendly <- gsub("Days_", "", duration)
+        paste0("Auction (", duration_friendly, " days)")
+      } else {
+        "Buy It Now (Fixed Price)"
+      }
+
+      # Format price label based on listing type
+      price_label <- if (listing_type == "auction") "Starting Bid:" else "Price:"
 
       showModal(
         modalDialog(
@@ -377,11 +465,30 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           # Listing details
           tags$dl(
             class = "row",
+            tags$dt(class = "col-sm-3", "Listing Type:"),
+            tags$dd(class = "col-sm-9", type_label),
+
             tags$dt(class = "col-sm-3", "Title:"),
             tags$dd(class = "col-sm-9", title),
 
-            tags$dt(class = "col-sm-3", "Price:"),
+            tags$dt(class = "col-sm-3", price_label),
             tags$dd(class = "col-sm-9", sprintf("€%.2f", price)),
+
+            # Show Buy It Now if specified
+            if (!is.null(buy_it_now) && !is.na(buy_it_now) && buy_it_now > 0) {
+              tagList(
+                tags$dt(class = "col-sm-3", "Buy It Now:"),
+                tags$dd(class = "col-sm-9", sprintf("€%.2f", buy_it_now))
+              )
+            } else { NULL },
+
+            # Show Reserve if specified
+            if (!is.null(reserve) && !is.na(reserve) && reserve > 0) {
+              tagList(
+                tags$dt(class = "col-sm-3", "Reserve Price:"),
+                tags$dd(class = "col-sm-9", sprintf("€%.2f", reserve))
+              )
+            } else { NULL },
 
             tags$dt(class = "col-sm-3", "Condition:"),
             tags$dd(class = "col-sm-9", condition),
@@ -1207,6 +1314,26 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           description <- input[[paste0("item_description_", i)]]
           price <- input[[paste0("starting_price_", i)]]
           condition <- input[[paste0("condition_", i)]]
+          listing_type <- input[[paste0("listing_type_", i)]] %||% "fixed_price"
+
+          # Get auction-specific inputs
+          duration <- if (listing_type == "auction") {
+            input[[paste0("auction_duration_", i)]] %||% "Days_7"
+          } else {
+            "GTC"
+          }
+
+          buy_it_now <- if (listing_type == "auction") {
+            input[[paste0("buy_it_now_price_", i)]]
+          } else {
+            NULL
+          }
+
+          reserve <- if (listing_type == "auction") {
+            input[[paste0("reserve_price_", i)]]
+          } else {
+            NULL
+          }
 
           # Validate inputs
           if (is.null(title) || trimws(title) == "") {
@@ -1224,8 +1351,41 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
             return()
           }
 
-          # Show confirmation modal
-          show_ebay_confirmation_modal(i, title, price, condition)
+          # Validate auction-specific requirements
+          if (listing_type == "auction") {
+            # Check eBay minimum
+            if (price < 0.99) {
+              showNotification("Starting bid must be at least €0.99 for auctions", type = "error")
+              return()
+            }
+
+            # Validate Buy It Now if specified
+            if (!is.null(buy_it_now) && !is.na(buy_it_now) && buy_it_now > 0) {
+              if (buy_it_now < price * 1.3) {
+                showNotification(
+                  sprintf("Buy It Now price (€%.2f) must be at least 30%% higher than starting bid (€%.2f)",
+                          buy_it_now, price),
+                  type = "error"
+                )
+                return()
+              }
+            }
+
+            # Validate Reserve if specified
+            if (!is.null(reserve) && !is.na(reserve) && reserve > 0) {
+              if (reserve < price) {
+                showNotification(
+                  sprintf("Reserve price (€%.2f) must be >= starting bid (€%.2f)", reserve, price),
+                  type = "error"
+                )
+                return()
+              }
+            }
+          }
+
+          # Show confirmation modal with auction details
+          show_ebay_confirmation_modal(i, title, price, condition, "Postcards",
+                                       listing_type, duration, buy_it_now, reserve)
         })
       })
     })
@@ -1254,6 +1414,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           description <- input[[paste0("item_description_", i)]]
           price <- input[[paste0("starting_price_", i)]]
           condition <- input[[paste0("condition_", i)]]
+          listing_type <- input[[paste0("listing_type_", i)]] %||% "fixed_price"
 
           # Get metadata inputs
           year <- input[[paste0("year_", i)]]
@@ -1262,6 +1423,27 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
           country <- input[[paste0("country_", i)]]
           region <- input[[paste0("region_", i)]]
           theme_keywords <- input[[paste0("theme_keywords_", i)]]
+
+          # Get auction-specific inputs
+          duration <- if (listing_type == "auction") {
+            input[[paste0("auction_duration_", i)]] %||% "Days_7"
+          } else {
+            "GTC"
+          }
+
+          buy_it_now <- if (listing_type == "auction") {
+            bin <- input[[paste0("buy_it_now_price_", i)]]
+            if (!is.null(bin) && !is.na(bin) && bin > 0) bin else NULL
+          } else {
+            NULL
+          }
+
+          reserve <- if (listing_type == "auction") {
+            res <- input[[paste0("reserve_price_", i)]]
+            if (!is.null(res) && !is.na(res) && res > 0) res else NULL
+          } else {
+            NULL
+          }
 
           # Check if eBay API is available
           api <- ebay_api()
@@ -1324,6 +1506,10 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
               image_url = image_file,
               ebay_user_id = active_account$user_id,
               ebay_username = active_account$username,
+              listing_type = listing_type,
+              listing_duration = duration,
+              buy_it_now_price = buy_it_now,
+              reserve_price = reserve,
               progress_callback = function(msg, val) {
                 progress$set(message = msg, value = val)
               }

@@ -251,6 +251,89 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
           error = paste0("Exception: ", e$message)
         ))
       })
+    },
+
+    #' @description Add auction listing (Chinese auction format)
+    #' @param item_data List with: title, description, country, location, category_id, start_price, condition_id, quantity=1, images, aspects, listing_duration, buy_it_now_price (optional), reserve_price (optional)
+    #' @return List with success, item_id, error
+    add_auction_item = function(item_data) {
+      cat("\n=== Trading API: AddItem (Auction) ===\n")
+      cat("   Title:", item_data$title, "\n")
+      cat("   Starting Bid:", item_data$start_price, "\n")
+      cat("   Duration:", item_data$listing_duration, "\n")
+      if (!is.null(item_data$buy_it_now_price)) {
+        cat("   Buy It Now:", item_data$buy_it_now_price, "\n")
+      }
+      if (!is.null(item_data$reserve_price)) {
+        cat("   Reserve Price:", item_data$reserve_price, "\n")
+      }
+
+      # Validate auction-specific requirements
+      validation_result <- private$validate_auction_data(item_data)
+      if (!validation_result$valid) {
+        return(list(
+          success = FALSE,
+          error = validation_result$error
+        ))
+      }
+
+      # Build XML request for auction
+      xml_body <- private$build_auction_xml(item_data)
+
+      # Debug: Show token info
+      token <- private$oauth$get_access_token()
+      if (!is.null(token) && nchar(token) > 20) {
+        token_preview <- paste0(
+          substr(token, 1, 10), "...",
+          substr(token, nchar(token) - 9, nchar(token))
+        )
+        cat("   🔑 Token being used:", token_preview, "\n")
+      }
+
+      # Debug: Save XML request to temp file
+      debug_file <- tempfile(pattern = "ebay_auction_request_", fileext = ".xml")
+      writeLines(xml_body, debug_file)
+      cat("   📄 XML request saved to:", debug_file, "\n")
+
+      cat("   Calling Trading API (AddItem for auction)...\n")
+
+      # Make request
+      tryCatch({
+        response <- private$make_request(xml_body, "AddItem")
+
+        # Check HTTP status
+        if (httr2::resp_is_error(response)) {
+          return(list(
+            success = FALSE,
+            error = paste0("HTTP ", httr2::resp_status(response), ": ", httr2::resp_status_desc(response))
+          ))
+        }
+
+        # Parse XML response
+        xml_response <- httr2::resp_body_string(response)
+        cat("   Response length:", nchar(xml_response), "characters\n")
+
+        result <- private$parse_response(xml_response)
+
+        if (result$success) {
+          cat("   ✅ Auction listing created via Trading API\n")
+          cat("   Item ID:", result$item_id, "\n")
+          if (!is.null(result$warnings)) {
+            cat("   ⚠️ Warnings:", paste(result$warnings, collapse = "; "), "\n")
+          }
+        } else {
+          cat("   ❌ Trading API failed:", result$error, "\n")
+        }
+
+        return(result)
+
+      }, error = function(e) {
+        cat("   ⚠️ Exception caught:", e$message, "\n")
+        return(list(
+          success = FALSE,
+          error = paste0("Exception: ", e$message)
+        ))
+      })
     }
   ),
 
@@ -580,6 +663,207 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
           return_id = NULL
         ))
       })
+    },
+
+    #' @description Validate auction-specific data
+    #' @param item_data Item data list
+    #' @return List with valid (TRUE/FALSE) and error message
+    validate_auction_data = function(item_data) {
+      # Validate starting price >= $0.99
+      if (is.null(item_data$start_price)) {
+        return(list(valid = FALSE, error = "Starting bid is required for auctions"))
+      }
+
+      start_price <- as.numeric(item_data$start_price)
+      if (is.na(start_price) || start_price < 0.99) {
+        return(list(valid = FALSE, error = "Starting bid must be at least $0.99"))
+      }
+
+      # Validate Buy It Now price (if specified)
+      if (!is.null(item_data$buy_it_now_price)) {
+        bin_price <- as.numeric(item_data$buy_it_now_price)
+        if (is.na(bin_price)) {
+          return(list(valid = FALSE, error = "Invalid Buy It Now price"))
+        }
+        if (bin_price < start_price * 1.3) {
+          return(list(
+            valid = FALSE,
+            error = sprintf("Buy It Now price ($%.2f) must be at least 30%% higher than starting bid ($%.2f)",
+                          bin_price, start_price)
+          ))
+        }
+      }
+
+      # Validate Reserve price (if specified)
+      if (!is.null(item_data$reserve_price)) {
+        reserve <- as.numeric(item_data$reserve_price)
+        if (is.na(reserve)) {
+          return(list(valid = FALSE, error = "Invalid Reserve price"))
+        }
+        if (reserve < start_price) {
+          return(list(
+            valid = FALSE,
+            error = sprintf("Reserve price ($%.2f) must be >= starting bid ($%.2f)", reserve, start_price)
+          ))
+        }
+      }
+
+      # Validate duration
+      valid_durations <- c("Days_3", "Days_5", "Days_7", "Days_10")
+      if (is.null(item_data$listing_duration) || !item_data$listing_duration %in% valid_durations) {
+        return(list(
+          valid = FALSE,
+          error = sprintf("Invalid auction duration. Must be one of: %s", paste(valid_durations, collapse = ", "))
+        ))
+      }
+
+      # Validate quantity is 1 (eBay requirement for auctions)
+      if (!is.null(item_data$quantity) && as.numeric(item_data$quantity) != 1) {
+        return(list(valid = FALSE, error = "Auction quantity must be 1"))
+      }
+
+      return(list(valid = TRUE, error = NULL))
+    },
+
+    #' @description Build AddItem XML request for auction
+    #' @param item_data Item data list
+    #' @return XML string
+    build_auction_xml = function(item_data) {
+      # Create root element
+      doc <- xml2::xml_new_root(
+        "AddItemRequest",
+        xmlns = "urn:ebay:apis:eBLBaseComponents"
+      )
+
+      # Add Item element
+      item <- xml2::xml_add_child(doc, "Item")
+
+      # CRITICAL: Add Country and Location
+      xml2::xml_add_child(item, "Country", item_data$country)
+      xml2::xml_add_child(item, "Location", item_data$location)
+
+      # Add currency (required by Trading API)
+      xml2::xml_add_child(item, "Currency", "USD")
+
+      # Add basic fields
+      xml2::xml_add_child(item, "Title", item_data$title)
+
+      # Add description (eBay accepts HTML in Description field)
+      formatted_description <- paste0(
+        "<div style='font-family: Arial, sans-serif;'>",
+        "<h2>", item_data$title, "</h2>",
+        "<p>", gsub("\n", "<br>", item_data$description), "</p>",
+        "</div>"
+      )
+      xml2::xml_add_child(item, "Description", formatted_description)
+
+      # Add category
+      primary_cat <- xml2::xml_add_child(item, "PrimaryCategory")
+      xml2::xml_add_child(primary_cat, "CategoryID", as.character(item_data$category_id))
+
+      # AUCTION-SPECIFIC: ListingType = Chinese
+      xml2::xml_add_child(item, "ListingType", "Chinese")
+
+      # AUCTION-SPECIFIC: StartPrice (starting bid)
+      start_price_node <- xml2::xml_add_child(item, "StartPrice", as.character(item_data$start_price))
+      xml2::xml_set_attr(start_price_node, "currencyID", "USD")
+
+      # AUCTION-SPECIFIC: ListingDuration
+      xml2::xml_add_child(item, "ListingDuration", item_data$listing_duration)
+
+      # OPTIONAL: Buy It Now Price
+      if (!is.null(item_data$buy_it_now_price)) {
+        bin_node <- xml2::xml_add_child(item, "BuyItNowPrice", as.character(item_data$buy_it_now_price))
+        xml2::xml_set_attr(bin_node, "currencyID", "USD")
+      }
+
+      # OPTIONAL: Reserve Price
+      if (!is.null(item_data$reserve_price)) {
+        reserve_node <- xml2::xml_add_child(item, "ReservePrice", as.character(item_data$reserve_price))
+        xml2::xml_set_attr(reserve_node, "currencyID", "USD")
+      }
+
+      # Add condition
+      xml2::xml_add_child(item, "ConditionID", as.character(item_data$condition_id))
+
+      # Add quantity (must be 1 for auctions)
+      xml2::xml_add_child(item, "Quantity", "1")
+
+      # Add images
+      if (!is.null(item_data$images) && length(item_data$images) > 0) {
+        pic_details <- xml2::xml_add_child(item, "PictureDetails")
+        for (img_url in item_data$images) {
+          xml2::xml_add_child(pic_details, "PictureURL", img_url)
+        }
+      }
+
+      # Add item specifics (aspects)
+      if (!is.null(item_data$aspects) && length(item_data$aspects) > 0) {
+        specifics <- xml2::xml_add_child(item, "ItemSpecifics")
+        for (aspect_name in names(item_data$aspects)) {
+          nvl <- xml2::xml_add_child(specifics, "NameValueList")
+          xml2::xml_add_child(nvl, "Name", aspect_name)
+
+          # Handle both single values and vectors
+          aspect_values <- item_data$aspects[[aspect_name]]
+          if (!is.list(aspect_values)) {
+            aspect_values <- list(aspect_values)
+          }
+
+          for (val in aspect_values) {
+            xml2::xml_add_child(nvl, "Value", as.character(val))
+          }
+        }
+      }
+
+      # Add business policies (reuse same logic as fixed price)
+      policy_ids <- private$get_business_policy_ids()
+
+      has_policies <- !is.null(policy_ids$fulfillment_id) ||
+                      !is.null(policy_ids$payment_id) ||
+                      !is.null(policy_ids$return_id)
+
+      if (has_policies) {
+        seller_profiles <- xml2::xml_add_child(item, "SellerProfiles")
+
+        if (!is.null(policy_ids$fulfillment_id)) {
+          shipping_profile <- xml2::xml_add_child(seller_profiles, "SellerShippingProfile")
+          xml2::xml_add_child(shipping_profile, "ShippingProfileID", policy_ids$fulfillment_id)
+        }
+
+        if (!is.null(policy_ids$payment_id)) {
+          payment_profile <- xml2::xml_add_child(seller_profiles, "SellerPaymentProfile")
+          xml2::xml_add_child(payment_profile, "PaymentProfileID", policy_ids$payment_id)
+        }
+
+        if (!is.null(policy_ids$return_id)) {
+          return_profile <- xml2::xml_add_child(seller_profiles, "SellerReturnProfile")
+          xml2::xml_add_child(return_profile, "ReturnProfileID", policy_ids$return_id)
+        }
+      } else {
+        # Fallback: Add basic shipping and payment details
+        cat("   No business policies found, using basic shipping/payment setup\n")
+
+        shipping_details <- xml2::xml_add_child(item, "ShippingDetails")
+
+        shipping_service <- xml2::xml_add_child(shipping_details, "ShippingServiceOptions")
+        xml2::xml_add_child(shipping_service, "ShippingService", "USPSFirstClass")
+        xml2::xml_add_child(shipping_service, "ShippingServicePriority", "1")
+        shipping_cost <- xml2::xml_add_child(shipping_service, "ShippingServiceCost", "3.00")
+        xml2::xml_set_attr(shipping_cost, "currencyID", "USD")
+
+        xml2::xml_add_child(item, "PaymentMethods", "PayPal")
+        xml2::xml_add_child(item, "PayPalEmailAddress", "your-paypal@example.com")
+
+        return_policy <- xml2::xml_add_child(item, "ReturnPolicy")
+        xml2::xml_add_child(return_policy, "ReturnsAcceptedOption", "ReturnsAccepted")
+        xml2::xml_add_child(return_policy, "RefundOption", "MoneyBack")
+        xml2::xml_add_child(return_policy, "ReturnsWithinOption", "Days_30")
+        xml2::xml_add_child(return_policy, "ShippingCostPaidByOption", "Buyer")
+      }
+
+      # Convert to string
+      return(as.character(doc))
     }
   )
 )

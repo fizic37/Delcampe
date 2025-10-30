@@ -19,11 +19,23 @@ save_ebay_listing(
   environment = "sandbox",
   ebay_user_id = NULL,
   ebay_username = NULL,
-  api_type = "inventory"
+  api_type = "inventory",
+  listing_type = "fixed_price",
+  listing_duration = "GTC",
+  buy_it_now_price = NULL,
+  reserve_price = NULL
 )
 }
 \arguments{
 \item{api_type}{API type used: "trading" or "inventory" (default: "inventory")}
+
+\item{listing_type}{Listing type: "auction" or "fixed_price" (default: "fixed_price")}
+
+\item{listing_duration}{Listing duration: "Days_3", "Days_5", "Days_7", "Days_10", or "GTC" (default: "GTC")}
+
+\item{buy_it_now_price}{Buy It Now price for auctions (optional)}
+
+\item{reserve_price}{Reserve price for auctions (optional)}
 }
 \description{
 Save eBay listing to database

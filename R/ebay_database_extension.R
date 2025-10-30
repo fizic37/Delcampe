@@ -44,13 +44,33 @@ initialize_ebay_tables <- function(db_path = "inst/app/data/tracking.sqlite") {
       DBI::dbExecute(con, "ALTER TABLE ebay_listings ADD COLUMN api_type TEXT DEFAULT 'inventory'")
       message("✅ Added api_type column to ebay_listings table")
     }
-    
+
+    # Migration: Add auction support columns if they don't exist
+    columns <- DBI::dbGetQuery(con, "PRAGMA table_info(ebay_listings)")
+    if (!"listing_type" %in% columns$name) {
+      DBI::dbExecute(con, "ALTER TABLE ebay_listings ADD COLUMN listing_type TEXT DEFAULT 'fixed_price'")
+      message("✅ Added listing_type column to ebay_listings table")
+    }
+    if (!"listing_duration" %in% columns$name) {
+      DBI::dbExecute(con, "ALTER TABLE ebay_listings ADD COLUMN listing_duration TEXT DEFAULT 'GTC'")
+      message("✅ Added listing_duration column to ebay_listings table")
+    }
+    if (!"buy_it_now_price" %in% columns$name) {
+      DBI::dbExecute(con, "ALTER TABLE ebay_listings ADD COLUMN buy_it_now_price REAL")
+      message("✅ Added buy_it_now_price column to ebay_listings table")
+    }
+    if (!"reserve_price" %in% columns$name) {
+      DBI::dbExecute(con, "ALTER TABLE ebay_listings ADD COLUMN reserve_price REAL")
+      message("✅ Added reserve_price column to ebay_listings table")
+    }
+
     # Create indexes
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_ebay_listings_card ON ebay_listings(card_id)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_ebay_listings_session ON ebay_listings(session_id)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_ebay_listings_status ON ebay_listings(status)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_ebay_listings_sku ON ebay_listings(sku)")
     DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_ebay_listings_api_type ON ebay_listings(api_type)")
+    DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_ebay_listings_listing_type ON ebay_listings(listing_type)")
     
     message("✅ eBay listings table initialized")
     return(TRUE)
@@ -63,12 +83,18 @@ initialize_ebay_tables <- function(db_path = "inst/app/data/tracking.sqlite") {
 
 #' Save eBay listing to database
 #' @param api_type API type used: "trading" or "inventory" (default: "inventory")
+#' @param listing_type Listing type: "auction" or "fixed_price" (default: "fixed_price")
+#' @param listing_duration Listing duration: "Days_3", "Days_5", "Days_7", "Days_10", or "GTC" (default: "GTC")
+#' @param buy_it_now_price Buy It Now price for auctions (optional)
+#' @param reserve_price Reserve price for auctions (optional)
 #' @export
 save_ebay_listing <- function(card_id, session_id, ebay_item_id = NULL,
                               ebay_offer_id = NULL, sku, status = "draft",
                               title = NULL, description = NULL, price = NULL,
                               condition = NULL, aspects = NULL, environment = "sandbox",
-                              ebay_user_id = NULL, ebay_username = NULL, api_type = "inventory") {
+                              ebay_user_id = NULL, ebay_username = NULL, api_type = "inventory",
+                              listing_type = "fixed_price", listing_duration = "GTC",
+                              buy_it_now_price = NULL, reserve_price = NULL) {
   tryCatch({
     con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
     on.exit(DBI::dbDisconnect(con))
@@ -92,14 +118,16 @@ save_ebay_listing <- function(card_id, session_id, ebay_item_id = NULL,
         SET ebay_item_id = ?, ebay_offer_id = ?, status = ?,
             title = ?, description = ?, price = ?, condition = ?,
             aspects = ?, ebay_user_id = ?, ebay_username = ?,
-            api_type = ?,
+            api_type = ?, listing_type = ?, listing_duration = ?,
+            buy_it_now_price = ?, reserve_price = ?,
             last_updated = CURRENT_TIMESTAMP,
             listed_at = CASE WHEN ? = 'listed' THEN CURRENT_TIMESTAMP ELSE listed_at END
         WHERE sku = ?
       ", list(ebay_item_id, ebay_offer_id, status,
               title, description, price, condition,
               aspects_json, ebay_user_id, ebay_username,
-              api_type,
+              api_type, listing_type, listing_duration,
+              buy_it_now_price, reserve_price,
               status, sku))
 
       message("Updated eBay listing: ", sku)
@@ -109,12 +137,14 @@ save_ebay_listing <- function(card_id, session_id, ebay_item_id = NULL,
         INSERT INTO ebay_listings (
           card_id, session_id, ebay_item_id, ebay_offer_id, sku,
           status, environment, title, description, price,
-          condition, aspects, ebay_user_id, ebay_username, api_type, listed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          condition, aspects, ebay_user_id, ebay_username, api_type,
+          listing_type, listing_duration, buy_it_now_price, reserve_price, listed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
           CASE WHEN ? = 'listed' THEN CURRENT_TIMESTAMP ELSE NULL END)
       ", list(card_id, session_id, ebay_item_id, ebay_offer_id, sku,
               status, environment, title, description, price,
-              condition, aspects_json, ebay_user_id, ebay_username, api_type, status))
+              condition, aspects_json, ebay_user_id, ebay_username, api_type,
+              listing_type, listing_duration, buy_it_now_price, reserve_price, status))
 
       message("Created eBay listing: ", sku)
     }
