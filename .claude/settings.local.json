@@ -18,7 +18,8 @@
       "mcp__serena__search_for_pattern",
       "mcp__serena__replace_symbol_body",
       "Read(//mnt/c/Users/mariu/Pictures/Screenshots/**)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
