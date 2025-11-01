@@ -1,22 +1,24 @@
 {
   "permissions": {
     "allow": [
+      "mcp__serena__list_memories",
+      "WebSearch",
       "mcp__serena__read_memory",
+      "mcp__serena__find_file",
       "mcp__serena__find_symbol",
-      "mcp__serena__search_for_pattern",
+      "WebFetch(domain:docs.posit.co)",
+      "mcp__serena__think_about_collected_information",
+      "Bash(R --version:*)",
       "mcp__serena__get_symbols_overview",
       "mcp__serena__insert_after_symbol",
+      "Bash(R/mod_stamp_export.R)",
       "Bash(Rscript:*)",
-      "mcp__serena__replace_symbol_body",
-      "Bash(curl:*)",
+      "Bash(sqlite3:*)",
       "mcp__serena__write_memory",
+      "mcp__serena__search_for_pattern",
+      "mcp__serena__replace_symbol_body",
       "Read(//mnt/c/Users/mariu/Pictures/Screenshots/**)",
-      "mcp__serena__list_memories",
-      "mcp__serena__list_dir",
-      "mcp__serena__think_about_collected_information",
-      "mcp__serena__think_about_whether_you_are_done",
-      "WebFetch(domain:www.ebay.com)",
-      "Bash(git add -A)"
+      "Bash(git add:*)"
     ],
     "deny": [],
     "ask": []

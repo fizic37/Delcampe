@@ -244,9 +244,86 @@ app_server <- function(input, output, session) {
     }
   )
 
+  # ======================================================================
+  # STAMP PROCESSING MODULES (Parallel to Postal Cards)
+  # ======================================================================
+
+  # Stamp Face processor module with callbacks
+  stamp_face_server_return <- tryCatch({
+    mod_stamp_face_processor_server(
+      "stamp_face_processor",
+      stamp_type = "face",
+      on_extraction_complete = function(count, dir, used_existing = FALSE) {
+        app_rv$stamp_face_extraction_complete <- TRUE
+        app_rv$stamp_face_extracted_count <- count
+        app_rv$stamp_face_extraction_dir <- dir
+        app_rv$stamp_face_used_existing <- used_existing
+      },
+      on_grid_update = function(rows, cols) {
+        app_rv$stamp_num_rows <- rows
+        app_rv$stamp_num_cols <- cols
+      },
+      on_image_upload = function() {
+        app_rv$stamp_face_image_uploaded <- TRUE
+        app_rv$stamp_last_face_upload_time <- Sys.time()
+        # Reset stamp combined images
+        app_rv$stamp_images_processed <- FALSE
+        app_rv$stamp_lot_paths <- NULL
+        app_rv$stamp_combined_paths <- NULL
+        app_rv$stamp_combined_image_paths <- NULL
+        # Reset stamp face extraction for THIS upload
+        app_rv$stamp_face_extraction_complete <- FALSE
+        app_rv$stamp_face_extracted_count <- 0
+        app_rv$stamp_face_used_existing <- FALSE
+      }
+    )
+  }, error = function(e) {
+    cat("❌ ERROR calling stamp face module:", e$message, "\n")
+    print(e)
+    NULL
+  })
+
+  # Stamp Verso processor module with callbacks
+  stamp_verso_server_return <- tryCatch({
+    mod_stamp_verso_processor_server(
+      "stamp_verso_processor",
+      stamp_type = "verso",
+      on_extraction_complete = function(count, dir, used_existing = FALSE) {
+        app_rv$stamp_verso_extraction_complete <- TRUE
+        app_rv$stamp_verso_extracted_count <- count
+        app_rv$stamp_verso_extraction_dir <- dir
+        app_rv$stamp_verso_used_existing <- used_existing
+      },
+      on_grid_update = function(rows, cols) {
+        # Stamp verso can also update grid if needed
+        if (is.null(app_rv$stamp_num_rows) || is.null(app_rv$stamp_num_cols)) {
+          app_rv$stamp_num_rows <- rows
+          app_rv$stamp_num_cols <- cols
+        }
+      },
+      on_image_upload = function() {
+        app_rv$stamp_verso_image_uploaded <- TRUE
+        app_rv$stamp_last_verso_upload_time <- Sys.time()
+        # Reset stamp combined images
+        app_rv$stamp_images_processed <- FALSE
+        app_rv$stamp_lot_paths <- NULL
+        app_rv$stamp_combined_paths <- NULL
+        app_rv$stamp_combined_image_paths <- NULL
+        # Reset stamp verso extraction for THIS upload
+        app_rv$stamp_verso_extraction_complete <- FALSE
+        app_rv$stamp_verso_extracted_count <- 0
+        app_rv$stamp_verso_used_existing <- FALSE
+      }
+    )
+  }, error = function(e) {
+    cat("❌ ERROR calling stamp verso module:", e$message, "\n")
+    print(e)
+    NULL
+  })
+
   # Settings server - FIXED: Changed role to "admin" to show LLM Models tab
   mod_settings_server("settings", reactive(list(email = "admin@delcampe.com", role = "admin")))
-  
+
   # Tracking viewer server
   mod_tracking_viewer_server("tracking_viewer_1")
 
@@ -973,4 +1050,376 @@ app_server <- function(input, output, session) {
     ebay_api = ebay_api,
     ebay_account_manager = ebay_account_manager
   )
+
+  # ======================================================================
+  # STAMP EXPORT MODULES (Parallel to Postal Cards)
+  # ======================================================================
+
+  mod_stamp_export_server(
+    "stamp_lot_export",
+    image_paths = reactive(app_rv$stamp_lot_paths),
+    image_type = "lot",
+    ebay_api = ebay_api,
+    ebay_account_manager = ebay_account_manager
+  )
+
+  mod_stamp_export_server(
+    "stamp_combined_export",
+    image_paths = reactive(app_rv$stamp_combined_paths),
+    image_file_paths = reactive(app_rv$stamp_combined_file_paths),
+    image_type = "combined",
+    ebay_api = ebay_api,
+    ebay_account_manager = ebay_account_manager
+  )
+
+  # ======================================================================
+  # STAMP OUTPUT DISPLAYS (Parallel to Postal Cards)
+  # ======================================================================
+
+  # ======================================================================
+  # STAMP OUTPUT DISPLAYS - Purple Theme for Visual Distinction
+  # ======================================================================
+
+  output$stamp_combined_image_output_display <- renderUI({
+    # Show "Start Over" button if any processing has been done
+    show_reset_button <- isTRUE(app_rv$stamp_face_image_uploaded) || isTRUE(app_rv$stamp_verso_image_uploaded)
+
+    # State 1: Nothing uploaded yet OR images uploaded but not extracted
+    if (!isTRUE(app_rv$stamp_face_extraction_complete) || !isTRUE(app_rv$stamp_verso_extraction_complete)) {
+      bslib::card(
+        header = bslib::card_header(
+          div(
+            style = "display: flex; justify-content: space-between; align-items: center;",
+            span("🟣 Stamp Processing Status"),
+            if (show_reset_button) {
+              actionButton(
+                inputId = "stamp_start_over",
+                label = "Start Over",
+                icon = icon("redo"),
+                class = "btn-sm btn-outline-light",
+                style = "border-color: white; color: white;"
+              )
+            }
+          ),
+          style = "background-color: #7B2CBF; color: white;"  # Purple theme
+        ),
+        class = "combined-output-card compact-status-card",
+        div(
+          style = "padding: 12px 20px; display: flex; align-items: center; justify-content: space-between; gap: 15px;",
+          div(
+            style = "font-weight: 600; color: #7B2CBF;",
+            "🟣 Upload and extract both stamp sides"
+          ),
+          div(
+            style = "display: flex; gap: 10px;",
+            div(
+              style = paste0("padding: 6px 16px; border-radius: 15px; font-size: 13px; font-weight: 600; ",
+                            if(isTRUE(app_rv$stamp_face_extraction_complete)) "background-color: #e0d4f7; color: #4c1d95;" else "background-color: #f3e5f5; color: #7B2CBF; border: 2px solid #9D4EDD;"),
+              if(isTRUE(app_rv$stamp_face_extraction_complete)) "✓ Face Extracted" else "○ Face Needed"
+            ),
+            div(
+              style = paste0("padding: 6px 16px; border-radius: 15px; font-size: 13px; font-weight: 600; ",
+                            if(isTRUE(app_rv$stamp_verso_extraction_complete)) "background-color: #e0d4f7; color: #4c1d95;" else "background-color: #f3e5f5; color: #7B2CBF; border: 2px solid #9D4EDD;"),
+              if(isTRUE(app_rv$stamp_verso_extraction_complete)) "✓ Verso Extracted" else "○ Verso Needed"
+            )
+          )
+        )
+      )
+    }
+    # State 2: Both extractions complete but not yet combined
+    else if (isTRUE(app_rv$stamp_face_extraction_complete) && isTRUE(app_rv$stamp_verso_extraction_complete) &&
+             (is.null(app_rv$stamp_combined_paths) || length(app_rv$stamp_combined_paths) == 0)) {
+
+      bslib::card(
+        header = bslib::card_header(
+          div(
+            style = "display: flex; justify-content: space-between; align-items: center;",
+            span("🟣 Ready to Combine Stamp Images"),
+            actionButton(
+              inputId = "stamp_start_over",
+              label = "Start Over",
+              icon = icon("redo"),
+              class = "btn-sm btn-outline-light",
+              style = "border-color: white; color: white;"
+            )
+          ),
+          style = "background-color: #9D4EDD; color: white;"  # Lighter purple
+        ),
+        class = "combined-output-card compact-status-card",
+        div(
+          style = "padding: 15px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;",
+          div(
+            style = "flex: 1; min-width: 200px;",
+            h5("🎯 Both stamp sides processed!", style = "color: #9D4EDD; margin: 0 0 5px 0;"),
+            p(paste(app_rv$stamp_face_extracted_count, "face +",
+                   app_rv$stamp_verso_extracted_count, "verso images"),
+              style = "margin: 0; font-size: 14px; color: #666;")
+          ),
+          actionButton(
+            inputId = "process_stamp_combined",
+            label = "Combine Stamp Images",
+            icon = icon("wand-magic-sparkles"),
+            class = "btn-lg",
+            style = "background: linear-gradient(135deg, #9D4EDD 0%, #7B2CBF 100%); border: none; color: white; padding: 15px 40px; border-radius: 12px; font-weight: 700; font-size: 18px; box-shadow: 0 4px 15px rgba(157, 78, 221, 0.4); transition: all 0.3s ease; cursor: pointer;"
+          )
+        )
+      )
+    }
+    # State 3: Images combined - show success message with Start Over button
+    else if (!is.null(app_rv$stamp_combined_paths) && length(app_rv$stamp_combined_paths) > 0) {
+      div(
+        style = "background-color: #e0d4f7; border: 2px solid #9D4EDD; border-radius: 8px; padding: 20px; margin-bottom: 20px;",
+        div(
+          style = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;",
+          h4(
+            style = "margin: 0; color: #4c1d95;",
+            "🟣 Stamp Processing Complete!"
+          ),
+          actionButton(
+            inputId = "stamp_start_over",
+            label = "Start Over",
+            icon = icon("redo"),
+            class = "btn",
+            style = "background-color: #9D4EDD; color: white; border: none;"
+          )
+        ),
+        p(
+          style = "margin: 0; color: #4c1d95; font-weight: 600;",
+          "Combined stamp images are ready for export below. Click Start Over to process new stamps."
+        )
+      )
+    }
+  })
+
+  output$stamp_export_section_display <- renderUI({
+    if (!is.null(app_rv$stamp_combined_paths) && length(app_rv$stamp_combined_paths) > 0) {
+      bslib::card(
+        header = bslib::card_header(
+          "🟣 Export Stamps to eBay",
+          style = "background-color: #7B2CBF; color: white;"  # Purple theme
+        ),
+        div(
+          style = "padding: 20px;",
+          fluidRow(
+            column(
+              width = 12,
+              h5("📦 Stamp Lots", style = "margin-bottom: 15px; color: #7B2CBF;"),
+              p("Export complete stamp lots (vertical stacks by column)",
+                style = "font-size: 13px; color: #666; margin-bottom: 15px;"),
+              mod_stamp_export_ui("stamp_lot_export")
+            )
+          ),
+          fluidRow(
+            column(
+              width = 12,
+              h5("🖼️ Individual Combined Stamp Images", style = "margin-bottom: 15px; color: #7B2CBF;"),
+              p("Export individual face+verso stamp pairs",
+                style = "font-size: 13px; color: #666; margin-bottom: 15px;"),
+              mod_stamp_export_ui("stamp_combined_export")
+            )
+          )
+        )
+      )
+    }
+  })
+
+  # ======================================================================
+  # STAMP BUTTON HANDLERS - Purple Theme
+  # ======================================================================
+
+  # "Combine Stamp Images" button handler
+  observeEvent(input$process_stamp_combined, {
+    if (isTRUE(app_rv$stamp_face_extraction_complete) && isTRUE(app_rv$stamp_verso_extraction_complete)) {
+
+      tryCatch({
+        # Check if Python is available
+        if (!exists("combine_face_verso_images", envir = .GlobalEnv)) {
+          showNotification("Python functions not available. Please restart the app.", type = "error")
+          return()
+        }
+
+        # Save combined images directly to session temp dir
+        combined_output_dir <- session_temp_dir()
+
+        # Get grid dimensions
+        num_rows <- app_rv$stamp_num_rows %||% 1
+        num_cols <- app_rv$stamp_num_cols %||% 1
+
+        cat("\n🟣 PROCESSING COMBINED STAMP IMAGES:\n")
+        cat("   Face dir:", app_rv$stamp_face_extraction_dir, "\n")
+        cat("   Verso dir:", app_rv$stamp_verso_extraction_dir, "\n")
+        cat("   Output dir:", combined_output_dir, "\n")
+        cat("   Grid:", num_rows, "x", num_cols, "\n")
+
+        # Call Python function to combine images
+        py_results <- combine_face_verso_images(
+          face_dir = app_rv$stamp_face_extraction_dir,
+          verso_dir = app_rv$stamp_verso_extraction_dir,
+          output_dir = combined_output_dir,
+          num_rows = as.integer(num_rows),
+          num_cols = as.integer(num_cols)
+        )
+
+        if (!is.null(py_results$lot_paths) && length(py_results$lot_paths) > 0) {
+          # Convert file paths to web URLs
+          abs_lot_paths <- normalizePath(unlist(py_results$lot_paths), winslash = "/")
+          abs_combined_paths <- normalizePath(unlist(py_results$combined_paths), winslash = "/")
+          abs_session_dir <- normalizePath(session_temp_dir(), winslash = "/")
+
+          rel_lot_paths <- sub(paste0("^", gsub("/", "\\/", abs_session_dir), "/*"), "", abs_lot_paths)
+          rel_combined_paths <- sub(paste0("^", gsub("/", "\\/", abs_session_dir), "/*"), "", abs_combined_paths)
+
+          rel_lot_paths <- sub("^/*", "", rel_lot_paths)
+          rel_combined_paths <- sub("^/*", "", rel_combined_paths)
+
+          # Create web URLs
+          app_rv$stamp_lot_paths <- paste("combined_session_images", rel_lot_paths, sep = "/")
+          app_rv$stamp_combined_paths <- paste("combined_session_images", rel_combined_paths, sep = "/")
+          app_rv$stamp_combined_file_paths <- abs_combined_paths
+
+          # Track combined stamp images in database
+          tryCatch({
+            combined_stamp_ids <- list()
+            for (i in seq_along(abs_combined_paths)) {
+              combined_path <- abs_combined_paths[i]
+              combined_hash <- calculate_image_hash(combined_path)
+
+              if (!is.null(combined_hash)) {
+                stamp_id <- get_or_create_stamp(
+                  file_hash = combined_hash,
+                  image_type = "combined",
+                  original_filename = basename(combined_path),
+                  file_size = file.info(combined_path)$size
+                )
+
+                combined_stamp_ids[[i]] <- stamp_id
+
+                save_stamp_processing(
+                  stamp_id = stamp_id,
+                  crop_paths = NULL,
+                  h_boundaries = NULL,
+                  v_boundaries = NULL,
+                  grid_rows = as.integer(num_rows),
+                  grid_cols = as.integer(num_cols),
+                  extraction_dir = as.character(combined_output_dir),
+                  ai_data = NULL
+                )
+
+                track_stamp_activity(
+                  session_id = session$token,
+                  stamp_id = stamp_id,
+                  action = "images_combined",
+                  details = list(
+                    combined_index = i,
+                    combined_path = combined_path,
+                    grid = paste0(num_rows, "x", num_cols)
+                  )
+                )
+              }
+            }
+
+            app_rv$stamp_combined_stamp_ids <- combined_stamp_ids
+            message("✅ Combined stamp images tracked: ", length(combined_stamp_ids), " stamps")
+          }, error = function(e) {
+            message("⚠️ Failed to track combined stamps: ", e$message)
+          })
+
+          # Track stamp lot images
+          tryCatch({
+            lot_stamp_ids <- list()
+            for (i in seq_along(abs_lot_paths)) {
+              lot_path <- abs_lot_paths[i]
+              lot_hash <- calculate_image_hash(lot_path)
+
+              if (!is.null(lot_hash)) {
+                stamp_id <- get_or_create_stamp(
+                  file_hash = lot_hash,
+                  image_type = "lot",
+                  original_filename = basename(lot_path),
+                  file_size = file.info(lot_path)$size
+                )
+
+                lot_stamp_ids[[i]] <- stamp_id
+
+                save_stamp_processing(
+                  stamp_id = stamp_id,
+                  crop_paths = NULL,
+                  h_boundaries = NULL,
+                  v_boundaries = NULL,
+                  grid_rows = as.integer(num_rows),
+                  grid_cols = as.integer(num_cols),
+                  extraction_dir = as.character(combined_output_dir),
+                  ai_data = NULL
+                )
+
+                track_stamp_activity(
+                  session_id = session$token,
+                  stamp_id = stamp_id,
+                  action = "lot_created",
+                  details = list(
+                    lot_index = i,
+                    lot_path = lot_path,
+                    grid = paste0(num_rows, "x", num_cols)
+                  )
+                )
+              }
+            }
+
+            app_rv$stamp_lot_stamp_ids <- lot_stamp_ids
+            message("✅ Stamp lot images tracked: ", length(lot_stamp_ids), " lots")
+          }, error = function(e) {
+            message("⚠️ Failed to track stamp lots: ", e$message)
+          })
+
+          cat("✅ Stamp processing complete!\n\n")
+
+        } else {
+          showNotification("No images were generated. Check the console for details.", type = "warning")
+        }
+
+      }, error = function(e) {
+        cat("❌ ERROR in process_stamp_combined:\n")
+        cat("   Message:", e$message, "\n")
+        showNotification(paste("Stamp processing failed:", e$message), type = "error")
+      })
+    }
+  })
+
+  # "Start Over" button for stamps - complete workflow reset
+  observeEvent(input$stamp_start_over, {
+    # Reset Stamp Face module
+    if (!is.null(stamp_face_server_return) && !is.null(stamp_face_server_return$reset_module)) {
+      stamp_face_server_return$reset_module()
+    }
+
+    # Reset Stamp Verso module
+    if (!is.null(stamp_verso_server_return) && !is.null(stamp_verso_server_return$reset_module)) {
+      stamp_verso_server_return$reset_module()
+    }
+
+    # Reset all stamp-level reactive values
+    app_rv$stamp_face_extraction_complete <- FALSE
+    app_rv$stamp_verso_extraction_complete <- FALSE
+    app_rv$stamp_face_image_uploaded <- FALSE
+    app_rv$stamp_verso_image_uploaded <- FALSE
+    app_rv$stamp_face_extracted_count <- 0
+    app_rv$stamp_verso_extracted_count <- 0
+    app_rv$stamp_face_extraction_dir <- NULL
+    app_rv$stamp_verso_extraction_dir <- NULL
+    app_rv$stamp_combined_paths <- NULL
+    app_rv$stamp_lot_paths <- NULL
+    app_rv$stamp_combined_file_paths <- NULL
+    app_rv$stamp_num_rows <- NULL
+    app_rv$stamp_num_cols <- NULL
+    app_rv$stamp_last_face_upload_time <- NULL
+    app_rv$stamp_last_verso_upload_time <- NULL
+    app_rv$stamp_face_used_existing <- FALSE
+    app_rv$stamp_verso_used_existing <- FALSE
+
+    showNotification(
+      "🟣 Ready for new stamp upload session. Upload Face and Verso stamp images to begin.",
+      type = "message",
+      duration = 5
+    )
+  })
 }

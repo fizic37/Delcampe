@@ -76,26 +76,59 @@ app_ui <- function(request) {
         )
       ),
 
-      # Stamps Tab - Placeholder for future feature
+      # Stamps Tab - Full implementation
       bslib::nav_panel(
         title = "Stamps",
         icon = icon("stamp"),
         value = "stamps",
 
-        bslib::page_fillable(
-          padding = 20,
-          bslib::card(
-            bslib::card_header(
-              "Stamps Feature",
-              style = "background-color: #52B788; color: white;"
-            ),
-            div(
-              style = "padding: 40px; text-align: center;",
-              icon("stamp", style = "font-size: 48px; color: #6c757d; margin-bottom: 20px;"),
-              h4("Coming Soon!", style = "color: #495057; margin-bottom: 15px;"),
-              p("The Stamps feature is under development.", style = "color: #6c757d; font-size: 16px;"),
-              p("This section will allow you to process stamp collections separately from postal cards.",
-                style = "color: #6c757d; font-size: 14px; margin-top: 10px;")
+        # Combined stamp output display section at top
+        fluidRow(
+          column(
+            width = 12,
+            uiOutput("stamp_combined_image_output_display")
+          )
+        ),
+
+        # Export section (shown after processing)
+        fluidRow(
+          style = "margin-top: 20px;",
+          column(
+            width = 12,
+            uiOutput("stamp_export_section_display")
+          )
+        ),
+
+        # Face and Verso processing in two columns
+        fluidRow(
+          style = "margin-top: 20px;",
+          # Stamp Face Processing Section
+          column(
+            width = 6,
+            class = "face-column",
+            bslib::card(
+              header = bslib::card_header(
+                "Stamp Face Processing",
+                style = "background-color: #9D4EDD; color: white;"
+              ),
+              class = "stamps-processing-card stamp-module-card",
+              style = "min-height: 600px;",
+              mod_stamp_face_processor_ui("stamp_face_processor", stamp_type = "face")
+            )
+          ),
+
+          # Stamp Verso Processing Section
+          column(
+            width = 6,
+            class = "verso-column",
+            bslib::card(
+              header = bslib::card_header(
+                "Stamp Verso Processing",
+                style = "background-color: #7B2CBF; color: white;"
+              ),
+              class = "stamps-processing-card stamp-module-card",
+              style = "min-height: 600px;",
+              mod_stamp_verso_processor_ui("stamp_verso_processor", stamp_type = "verso")
             )
           )
         )
@@ -258,6 +291,46 @@ golem_add_external_resources <- function() {
       #process_combined:active {
         transform: translateY(0px);
         box-shadow: 0 2px 10px rgba(82, 183, 136, 0.3) !important;
+      }
+
+      /* ================================================================ */
+      /* STAMP MODULE PURPLE THEME - Override all green buttons with purple */
+      /* ================================================================ */
+
+      /* Target all Browse buttons in stamp modules */
+      div[id*='stamp_face_processor'] .btn-file,
+      div[id*='stamp_face_processor'] .file-input-inline .btn,
+      div[id*='stamp_verso_processor'] .btn-file,
+      div[id*='stamp_verso_processor'] .file-input-inline .btn,
+      div[id*='stamp_face_processor'] .btn-default,
+      div[id*='stamp_verso_processor'] .btn-default {
+        background: linear-gradient(135deg, #9D4EDD 0%, #7B2CBF 100%) !important;
+        background-color: #9D4EDD !important;
+        border-color: #7B2CBF !important;
+        color: white !important;
+        font-weight: 600 !important;
+      }
+
+      /* Hover effect for stamp Browse buttons */
+      div[id*='stamp_face_processor'] .btn-file:hover,
+      div[id*='stamp_face_processor'] .file-input-inline .btn:hover,
+      div[id*='stamp_verso_processor'] .btn-file:hover,
+      div[id*='stamp_verso_processor'] .file-input-inline .btn:hover {
+        background: linear-gradient(135deg, #7B2CBF 0%, #6A1FA8 100%) !important;
+        background-color: #7B2CBF !important;
+        box-shadow: 0 3px 10px rgba(157, 78, 221, 0.5) !important;
+      }
+
+      /* Purple theme for Combine Stamp Images button hover */
+      #process_stamp_combined:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(157, 78, 221, 0.6) !important;
+        background: linear-gradient(135deg, #7B2CBF 0%, #9D4EDD 100%) !important;
+      }
+
+      #process_stamp_combined:active {
+        transform: translateY(0px);
+        box-shadow: 0 2px 10px rgba(157, 78, 221, 0.3) !important;
       }
     ")),
     # FIXED: Include draggable lines CSS and JavaScript with correct Golem paths

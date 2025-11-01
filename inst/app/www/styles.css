@@ -1,3 +1,6 @@
+/* Import Google Font for Stamps Module */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
 /* Enhanced Draggable Lines Styles - FIXED VERSION */
 
 /* Base styles for draggable lines - CRITICAL for visibility */
@@ -167,6 +170,60 @@
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(64, 145, 108, 0.3);
 }
+
+/* ============================================================================
+   STAMP MODULE PURPLE THEME - Must come BEFORE postal card green theme
+   ============================================================================ */
+
+/* Custom font for stamp modules - Poppins for a distinct look */
+.stamp-module-card,
+.stamp-module-card * {
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+}
+
+.stamp-module-card .card-header {
+  letter-spacing: 0.5px;
+}
+
+/* Purple Browse buttons for stamp modules - Target by parent card class */
+.stamp-module-card .file-input-inline .btn,
+.stamp-module-card .btn-file,
+.stamp-module-card .btn-default {
+  background-color: #9D4EDD !important;
+  background: linear-gradient(135deg, #9D4EDD 0%, #7B2CBF 100%) !important;
+  border-color: #7B2CBF !important;
+  color: white !important;
+}
+
+.stamp-module-card .file-input-inline .btn:hover,
+.stamp-module-card .btn-file:hover,
+.stamp-module-card .btn-default:hover {
+  background-color: #7B2CBF !important;
+  background: linear-gradient(135deg, #7B2CBF 0%, #6A1FA8 100%) !important;
+  border-color: #6A1FA8 !important;
+  box-shadow: 0 2px 8px rgba(157, 78, 221, 0.4) !important;
+}
+
+/* Purple Extract button for stamp modules */
+.stamp-module-card .btn-extract {
+  background: linear-gradient(135deg, #9D4EDD 0%, #7B2CBF 100%) !important;
+  box-shadow: 0 4px 12px rgba(157, 78, 221, 0.3) !important;
+}
+
+.stamp-module-card .btn-extract:hover {
+  background: linear-gradient(135deg, #7B2CBF 0%, #6A1FA8 100%) !important;
+  box-shadow: 0 6px 16px rgba(157, 78, 221, 0.4) !important;
+}
+
+/* Purple focus states for stamp form controls */
+.stamp-module-card .form-control:focus {
+  border-color: #9D4EDD !important;
+  box-shadow: 0 0 0 0.2rem rgba(157, 78, 221, 0.25) !important;
+}
+
+/* ============================================================================
+   POSTAL CARD GREEN THEME - Restricted to postal card modules only
+   ============================================================================ */
 
 .file-input-inline .form-control {
   border: 2px solid #dee2e6;
@@ -430,13 +487,13 @@ img[id$="preview_image"] {
   .card-header-custom {
     cursor: default;
   }
-  
+
   .toggle-icon,
   .form-actions,
   .ai-controls {
     display: none;
   }
-  
+
   .card-content {
     display: block !important;
   }

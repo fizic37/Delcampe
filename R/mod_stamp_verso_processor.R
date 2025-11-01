@@ -1,15 +1,35 @@
-#' postal_card_processor UI Function
+#' stamp_verso_processor UI Function
 #'
-#' @description A shiny Module for processing postal cards with draggable gridlines and Python integration.
+#' @description A shiny Module for processing stamp face images with draggable gridlines and Python integration.
 #'
 #' @param id,input,output,session Internal parameters for {shiny}.
 #'
 #' @export
 #'
-#' @importFrom shiny NS tagList 
-mod_postal_card_processor_ui <- function(id, card_type = "face") {
+#' @importFrom shiny NS tagList
+mod_stamp_verso_processor_ui <- function(id, stamp_type = "verso") {
   ns <- NS(id)
   tagList(
+    # Purple theme CSS for ALL elements in this stamp module
+    tags$style(HTML(paste0("
+      /* Target file upload Browse button */
+      #", ns(""), " .btn-file,
+      #", ns(""), " .btn-default,
+      #", ns("image_upload"), " + div .btn,
+      div[id^='", ns(""), "'] .btn-file,
+      div[id^='", ns(""), "'] input[type='file'] + .btn {
+        background: linear-gradient(135deg, #9D4EDD 0%, #7B2CBF 100%) !important;
+        border-color: #7B2CBF !important;
+        color: white !important;
+        font-weight: 600 !important;
+      }
+      /* Hover state */
+      div[id^='", ns(""), "'] .btn-file:hover,
+      div[id^='", ns(""), "'] .btn-default:hover {
+        background: linear-gradient(135deg, #7B2CBF 0%, #6A1FA8 100%) !important;
+        box-shadow: 0 2px 8px rgba(157, 78, 221, 0.4) !important;
+      }
+    "))),
     bslib::page_fluid(
       # Controls row - Reorganized for better layout
       fluidRow(
@@ -26,7 +46,7 @@ mod_postal_card_processor_ui <- function(id, card_type = "face") {
                   class = "styled-file-input-wrapper",
                   tags$label(
                     class = "upload-label",
-                    paste("Upload", tools::toTitleCase(card_type), "image")
+                    paste("Upload", tools::toTitleCase(stamp_type), "image")
                   ),
                   div(
                     class = "file-input-inline",
@@ -40,7 +60,7 @@ mod_postal_card_processor_ui <- function(id, card_type = "face") {
                   ),
                   p(
                     class = "upload-hint",
-                    paste("Upload the", toupper(card_type), "side of your postal cards")
+                    paste("Upload the", toupper(stamp_type), "side of your stamps")
                   )
                 )
               ),
@@ -70,10 +90,11 @@ mod_postal_card_processor_ui <- function(id, card_type = "face") {
                   class = "extract-button-wrapper",
                   style = "display: none; margin-top: 15px;",
                   actionButton(
-                    inputId = ns("extract_postcards"),
-                    label = paste("Extract", tools::toTitleCase(card_type), "Cards"),
+                    inputId = ns("extract_stamps"),
+                    label = paste("Extract", tools::toTitleCase(stamp_type), "Cards"),
                     icon = icon("scissors"),
-                    class = "btn-extract"
+                    class = "btn-lg",
+                    style = "background: linear-gradient(135deg, #9D4EDD 0%, #7B2CBF 100%); border: none; color: white; font-weight: 600; padding: 12px 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(157, 78, 221, 0.3); width: 100%;"
                   )
                 )
               )
@@ -87,14 +108,20 @@ mod_postal_card_processor_ui <- function(id, card_type = "face") {
         column(
           width = 7,
           bslib::card(
-            header = bslib::card_header(paste("Uploaded", card_type, "image")),
+            header = bslib::card_header(
+              paste("Uploaded", stamp_type, "image"),
+              style = "background-color: #E0D4F7; color: #4c1d95; font-weight: 600;"
+            ),
             uiOutput(ns("images_panel"))
           )
         ),
         column(
           width = 5,
           bslib::card(
-            header = bslib::card_header(paste("Extracted", card_type, "images")),
+            header = bslib::card_header(
+              paste("Extracted", stamp_type, "images"),
+              style = "background-color: #E0D4F7; color: #4c1d95; font-weight: 600;"
+            ),
             uiOutput(ns("extracted_cards_display"))
           )
         )
@@ -103,10 +130,10 @@ mod_postal_card_processor_ui <- function(id, card_type = "face") {
   )
 }
 
-#' postal_card_processor Server Functions
+#' stamp_verso_processor Server Functions
 #'
 #' @export
-mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_update = NULL, on_image_upload = NULL, on_extraction_complete = NULL) {
+mod_stamp_verso_processor_server <- function(id, stamp_type = "verso", on_grid_update = NULL, on_image_upload = NULL, on_extraction_complete = NULL) {
   result <- moduleServer(id, function(input, output, session) {
     
     ns <- session$ns
@@ -133,10 +160,10 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       extracted_paths_web = NULL,
       is_extracting = FALSE,  # Track extraction state to prevent unwanted observer triggers
       reset_in_progress = FALSE,  # NEW: Track reset to prevent upload observer from running
-      crop_card_mapping = NULL,  # NEW: Track mapping of crop rows to card_id for AI extraction
+      crop_card_mapping = NULL,  # NEW: Track mapping of crop rows to stamp_id for AI extraction
       trigger_extraction = 0,  # NEW: Reactive trigger for extraction (incremented to trigger)
       current_image_hash = NULL,  # FIX: Hash of current uploaded image for duplicate detection
-      current_card_id = NULL,  # FIX: Card ID from database tracking
+      current_stamp_id = NULL,  # FIX: Card ID from database tracking
       processing_status = "idle"  # NEW: Track upload/processing state for double-click prevention and error handling
     )
     
@@ -178,19 +205,19 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       rv$current_grid_cols <- NULL
       rv$boundaries_manually_adjusted <- FALSE
       rv$current_image_hash <- NULL  # FIX: Clear hash for new upload
-      rv$current_card_id <- NULL  # FIX: Clear card ID for new upload
+      rv$current_stamp_id <- NULL  # FIX: Clear card ID for new upload
       rv$processing_status <- "uploading"  # NEW: Set to uploading (for double-click prevention)
 
       # Save uploaded file with verification
       timestamp <- format(Sys.time(), "%Y-%m-%d_%H-%M-%S")
-      safe_filename <- paste0("uploaded_", card_type, "_", timestamp, ".jpg")
+      safe_filename <- paste0("uploaded_", stamp_type, "_", timestamp, ".jpg")
       upload_path <- file.path(session_temp_dir, safe_filename)
 
       # CRITICAL FIX: Verify file copy succeeded
       copy_success <- file.copy(file_info$datapath, upload_path, overwrite = TRUE)
       if (!copy_success) {
         showNotification(
-          paste("Failed to save uploaded", card_type, "image. Please try again."),
+          paste("Failed to save uploaded", stamp_type, "image. Please try again."),
           type = "error",
           duration = 5
         )
@@ -234,7 +261,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
 
       if (!file_ready) {
         showNotification(
-          paste("Uploaded", card_type, "image is not readable. Please try again."),
+          paste("Uploaded", stamp_type, "image is not readable. Please try again."),
           type = "error",
           duration = 5
         )
@@ -243,34 +270,34 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
 
       # Check for duplicate image before processing AND track upload
       rv$processing_status <- "tracking"
-      message("=== UPLOAD TRACKING START (card_type: ", card_type, ") ===")
+      message("=== UPLOAD TRACKING START (stamp_type: ", stamp_type, ") ===")
       image_hash <- calculate_image_hash(upload_path)
       message("  📌 Hash calculated: ", substr(image_hash, 1, 12), "...")
       rv$current_image_hash <- image_hash
 
       # NEW 3-LAYER ARCHITECTURE: Get or create postal card
       tryCatch({
-        message("  🔍 Calling get_or_create_card with image_type = ", card_type)
-        card_id <- get_or_create_card(
+        message("  🔍 Calling get_or_create_stamp with image_type = ", stamp_type)
+        stamp_id <- get_or_create_stamp(
           file_hash = image_hash,
-          image_type = card_type,
+          image_type = stamp_type,
           original_filename = file_info$name,
           file_size = file.info(upload_path)$size,
           dimensions = NULL
         )
 
-        rv$current_card_id <- card_id
-        message("  ✅ Card ID stored in rv: ", card_id)
+        rv$current_stamp_id <- stamp_id
+        message("  ✅ Card ID stored in rv: ", stamp_id)
 
         # Track in session activity
-        track_session_activity(
+        track_stamp_activity(
           session_id = session$token,
-          card_id = card_id,
+          stamp_id = stamp_id,
           action = "uploaded",
           details = list(upload_path = upload_path, filename = file_info$name)
         )
 
-        message("  ✅ Card tracked: card_id = ", card_id)
+        message("  ✅ Card tracked: stamp_id = ", stamp_id)
       }, error = function(e) {
         message("  ❌ Failed to track upload: ", e$message)
       })
@@ -373,7 +400,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           rv$processing_status <- "error"
 
           showNotification(
-            paste("Failed to detect grid in", card_type, "image. Please check image quality."),
+            paste("Failed to detect grid in", stamp_type, "image. Please check image quality."),
             type = "error",
             duration = 5
           )
@@ -442,7 +469,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           rv$processing_status <- "error"
 
           showNotification(
-            paste("Could not process", card_type, "image. Unsupported format or corrupted file."),
+            paste("Could not process", stamp_type, "image. Unsupported format or corrupted file."),
             type = "error",
             duration = 5
           )
@@ -458,7 +485,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
         rv$processing_status <- "error"
 
         showNotification(
-          paste("Could not process", card_type, "image. Unsupported format or corrupted file."),
+          paste("Could not process", stamp_type, "image. Unsupported format or corrupted file."),
           type = "error",
           duration = 5
         )
@@ -473,33 +500,16 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       shinyjs::show("extract_control")
       
       # Check for duplicate image AFTER upload and grid detection
-      message("\n=== DUPLICATE CHECK START (card_type: ", card_type, ") ===")
       if (!is.null(rv$current_image_hash)) {
-        message("  🔍 Searching for existing processing...")
-        message("     Hash: ", substr(rv$current_image_hash, 1, 12), "...")
-        message("     Type: ", card_type)
-
-        existing <- find_card_processing(rv$current_image_hash, card_type)
+        existing <- find_stamp_processing(rv$current_image_hash, stamp_type)
 
         if (!is.null(existing)) {
-          message("  📋 FOUND existing processing!")
-          message("     Card ID: ", existing$card_id)
-          message("     Last processed: ", existing$last_processed)
-          message("     Crop paths count: ", length(existing$crop_paths))
-
           validation <- validate_existing_crops(existing$crop_paths)
-          message("  🔎 Validating crop files...")
-          message("     All exist: ", validation$all_exist)
-          if (!validation$all_exist) {
-            message("     Missing files: ", paste(validation$missing_files, collapse = ", "))
-          }
 
           if (validation$all_exist) {
-            message("  ✅ Duplicate image detected - showing modal")
-
             # Store data for potential reuse
             rv$pending_existing_data <- existing
-            
+
             # Show modal asking user if they want to reuse previous processing
             showModal(modalDialog(
               title = "Duplicate Image Detected",
@@ -514,23 +524,17 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
                 "</ul>"
               )),
               footer = tagList(
-                actionButton(ns("use_existing_crops"), "Use Existing", class = "btn-primary"),
+                actionButton(ns("use_existing_crops"), "Use Existing",
+                            style = "background-color: #9D4EDD; border-color: #9D4EDD; color: white;"),
                 actionButton(ns("process_anyway"), "Process Anyway", class = "btn-secondary"),
                 modalButton("Cancel")
               ),
               size = "m",
               easyClose = FALSE
             ))
-          } else {
-            message("  ⚠️ Crops validation failed - not showing modal")
           }
-        } else {
-          message("  ℹ️ No existing processing found")
         }
-      } else {
-        message("  ⚠️ No image hash available - skipping duplicate check")
       }
-      message("=== DUPLICATE CHECK END ===\n")
 
       if (!is.null(on_image_upload)) on_image_upload()
     })
@@ -613,12 +617,12 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           rv$extracted_paths_web <- paste(resource_prefix, rel_paths, sep = "/")
           
           # Track reuse in session activity
-          track_session_activity(
+          track_stamp_activity(
             session_id = session$token,
-            card_id = rv$current_card_id,
+            stamp_id = rv$current_stamp_id,
             action = "reused",
             details = list(
-              source_card_id = existing$card_id,
+              source_stamp_id = existing$stamp_id,
               crops_count = length(rv$extracted_paths_web)
             )
           )
@@ -626,16 +630,16 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           # Force UI update
           rv$force_grid_redraw <- rv$force_grid_redraw + 1
 
-          message("Crops reused successfully from card_id: ", existing$card_id)
+          message("Crops reused successfully from stamp_id: ", existing$stamp_id)
 
           # NEW: Store crop-to-card mapping for AI extraction (Use Existing case)
           rv$crop_card_mapping <- data.frame(
             row = 0:(length(abs_paths) - 1),
-            card_id = rv$current_card_id,
+            stamp_id = rv$current_stamp_id,
             crop_path = abs_paths,
             stringsAsFactors = FALSE
           )
-          message("Crop mapping created from existing: ", nrow(rv$crop_card_mapping), " crops for card_id: ", rv$current_card_id)
+          message("Crop mapping created from existing: ", nrow(rv$crop_card_mapping), " crops for stamp_id: ", rv$current_stamp_id)
 
           # NEW: Trigger extraction complete callback
           # This allows the app to detect both modules are done and auto-combine
@@ -736,7 +740,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       if (is.null(rv$image_url_display)) {
         return(div(
           style = "width:100%; height:500px; display:flex; align-items:center; justify-content:center; color:#aaa; font-style:italic;",
-          paste("Upload a", card_type, "image to start.")
+          paste("Upload a", stamp_type, "image to start.")
         ))
       }
 
@@ -820,7 +824,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       rv$image_url_display <- NULL
 
       showNotification(
-        paste("Please upload a new", card_type, "image."),
+        paste("Please upload a new", stamp_type, "image."),
         type = "message",
         duration = 3
       )
@@ -833,12 +837,12 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
     
     output$num_cols_ui <- renderUI({
       req(rv$current_grid_cols)
-      numericInput(ns("num_cols_input"), "Grid Columns", value = rv$current_grid_cols, min = 1, max = 20)
+      numericInput(ns("num_cols_input"), "Grid Cols", value = rv$current_grid_cols, min = 1, max = 20)
     })
     
     # ---- Extraction logic ----
     observeEvent({
-      input$extract_postcards
+      input$extract_stamps
       rv$trigger_extraction
     }, {
       req(rv$image_path_original, length(rv$h_boundaries) > 1, length(rv$v_boundaries) > 1, python_sourced)
@@ -849,7 +853,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
 
       # CRITICAL FIX: Use persistent directory for crops, not temp session dir
       # This allows deduplication to work across app restarts
-      persistent_crops_dir <- file.path("inst/app/data/crops", card_type, rv$current_card_id)
+      persistent_crops_dir <- file.path("inst/app/data/crops", stamp_type, rv$current_stamp_id)
       dir.create(persistent_crops_dir, showWarnings = FALSE, recursive = TRUE)
 
       py_out_dir <- file.path(persistent_crops_dir, paste0("extract_", as.integer(Sys.time())))
@@ -893,15 +897,15 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
         rv$extracted_paths_web <- paste(resource_prefix, rel_paths, sep = "/")
 
         # Save processing with 3-layer architecture
-        message("\n=== SAVING EXTRACTION (card_type: ", card_type, ") ===")
+        message("\n=== SAVING EXTRACTION (stamp_type: ", stamp_type, ") ===")
         tryCatch({
           message("  💾 Saving processing to database...")
-          message("     Card ID: ", rv$current_card_id)
+          message("     Card ID: ", rv$current_stamp_id)
           message("     Crops: ", length(abs_paths))
           message("     Grid: ", rv$current_grid_rows, "x", rv$current_grid_cols)
 
-          save_card_processing(
-            card_id = rv$current_card_id,
+          save_stamp_processing(
+            stamp_id = rv$current_stamp_id,
             crop_paths = abs_paths,
             h_boundaries = rv$h_boundaries,
             v_boundaries = rv$v_boundaries,
@@ -911,14 +915,14 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
             ai_data = NULL
           )
 
-          track_session_activity(
+          track_stamp_activity(
             session_id = session$token,
-            card_id = rv$current_card_id,
+            stamp_id = rv$current_stamp_id,
             action = "processed",
             details = list(crops_count = length(abs_paths))
           )
 
-          message("  ✅ Processing saved for card_id: ", rv$current_card_id)
+          message("  ✅ Processing saved for stamp_id: ", rv$current_stamp_id)
         }, error = function(e) {
           message("  ❌ Failed to save processing: ", e$message)
         })
@@ -927,7 +931,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
         # Store crop-to-card mapping for AI extraction
         rv$crop_card_mapping <- data.frame(
           row = 0:(length(abs_paths) - 1),
-          card_id = rv$current_card_id,
+          stamp_id = rv$current_stamp_id,
           crop_path = abs_paths,
           stringsAsFactors = FALSE
         )
@@ -1069,7 +1073,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
 }
 
 ## To be copied in the UI
-# mod_postal_card_processor_ui("postal_card_processor_1")
+# mod_stamp_verso_processor_ui("stamp_verso_processor_1")
 
 ## To be copied in the server
-# mod_postal_card_processor_server("postal_card_processor_1")
+# mod_stamp_verso_processor_server("stamp_verso_processor_1")

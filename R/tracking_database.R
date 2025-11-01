@@ -208,6 +208,136 @@ initialize_tracking_db <- function(db_path = "inst/app/data/tracking.sqlite") {
       )
     ")
 
+    # ========== STAMP TABLES (PARALLEL TO POSTAL CARDS) ==========
+
+    # Layer 1: STAMPS - Master table (one entry per unique stamp image hash)
+    # Check if stamps table exists and needs migration
+    stamps_exists <- DBI::dbExistsTable(con, "stamps")
+
+    if (stamps_exists) {
+      # MIGRATION: Check if 'lot' is already in the constraint
+      # SQLite doesn't allow ALTER TABLE to modify CHECK constraints
+      # So we need to recreate the table if constraint is outdated
+      tryCatch({
+        # Try to insert a test 'lot' record (will fail if constraint doesn't allow it)
+        test_hash <- paste0("migration_test_", as.integer(Sys.time()))
+        DBI::dbExecute(con, "
+          INSERT INTO stamps (file_hash, original_filename, image_type, file_size)
+          VALUES (?, 'test.jpg', 'lot', 0)
+        ", params = list(test_hash))
+        # If successful, 'lot' is already allowed - clean up test record
+        DBI::dbExecute(con, "DELETE FROM stamps WHERE file_hash = ?", params = list(test_hash))
+        message("✅ Stamps table already supports 'lot' image type")
+      }, error = function(e) {
+        # Constraint violation - need to migrate
+        message("🔄 Migrating stamps table to support 'lot' image type...")
+
+        # Step 1: Rename old table
+        DBI::dbExecute(con, "ALTER TABLE stamps RENAME TO stamps_old")
+
+        # Step 2: Create new table with updated constraint
+        DBI::dbExecute(con, "
+          CREATE TABLE stamps (
+            stamp_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_hash TEXT UNIQUE NOT NULL,
+            original_filename TEXT NOT NULL,
+            image_type TEXT NOT NULL CHECK(image_type IN ('face', 'verso', 'combined', 'lot')),
+            file_size INTEGER,
+            width INTEGER,
+            height INTEGER,
+            first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_accessed DATETIME DEFAULT CURRENT_TIMESTAMP,
+            times_uploaded INTEGER DEFAULT 1
+          )
+        ")
+
+        # Step 3: Copy data from old table
+        DBI::dbExecute(con, "
+          INSERT INTO stamps SELECT * FROM stamps_old
+        ")
+
+        # Step 4: Drop old table
+        DBI::dbExecute(con, "DROP TABLE stamps_old")
+
+        message("✅ Stamps table migration complete")
+      })
+    } else {
+      # Create new table
+      DBI::dbExecute(con, "
+        CREATE TABLE IF NOT EXISTS stamps (
+          stamp_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          file_hash TEXT UNIQUE NOT NULL,
+          original_filename TEXT NOT NULL,
+          image_type TEXT NOT NULL CHECK(image_type IN ('face', 'verso', 'combined', 'lot')),
+          file_size INTEGER,
+          width INTEGER,
+          height INTEGER,
+          first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+          last_accessed DATETIME DEFAULT CURRENT_TIMESTAMP,
+          times_uploaded INTEGER DEFAULT 1
+        )
+      ")
+    }
+
+    # Layer 2: STAMP_PROCESSING - Processing results with stamp-specific fields
+    DBI::dbExecute(con, "
+      CREATE TABLE IF NOT EXISTS stamp_processing (
+        processing_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        stamp_id INTEGER UNIQUE NOT NULL,
+        crop_paths TEXT,
+        h_boundaries TEXT,
+        v_boundaries TEXT,
+        grid_rows INTEGER,
+        grid_cols INTEGER,
+        extraction_dir TEXT,
+        ai_title TEXT,
+        ai_description TEXT,
+        ai_condition TEXT,
+        ai_price REAL,
+        ai_model TEXT,
+        ai_country TEXT,
+        ai_year INTEGER,
+        ai_denomination TEXT,
+        ai_scott_number TEXT,
+        ai_perforation TEXT,
+        ai_watermark TEXT,
+        ai_grade TEXT,
+        processed_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (stamp_id) REFERENCES stamps(stamp_id) ON DELETE CASCADE
+      )
+    ")
+
+    # Layer 3: EBAY_STAMP_LISTINGS - eBay tracking for stamps (category 260)
+    DBI::dbExecute(con, "
+      CREATE TABLE IF NOT EXISTS ebay_stamp_listings (
+        listing_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        stamp_id INTEGER,
+        session_id TEXT NOT NULL,
+        ebay_item_id TEXT,
+        ebay_offer_id TEXT,
+        ebay_user_id TEXT,
+        ebay_username TEXT,
+        sku TEXT UNIQUE NOT NULL,
+        status TEXT DEFAULT 'draft',
+        environment TEXT DEFAULT 'sandbox',
+        title TEXT,
+        description TEXT,
+        price REAL,
+        quantity INTEGER DEFAULT 1,
+        condition TEXT,
+        category_id TEXT DEFAULT '260',
+        listing_url TEXT,
+        image_urls TEXT,
+        aspects TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        listed_at DATETIME,
+        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP,
+        error_message TEXT,
+        FOREIGN KEY (stamp_id) REFERENCES stamps(stamp_id),
+        FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+      )
+    ")
+
     # ========== SCHEMA MIGRATIONS ==========
 
     # Migration: Add ebay_user_id and ebay_username columns if they don't exist
@@ -293,7 +423,15 @@ initialize_tracking_db <- function(db_path = "inst/app/data/tracking.sqlite") {
       "CREATE INDEX IF NOT EXISTS idx_ebay_listings_card ON ebay_listings(card_id)",
       "CREATE INDEX IF NOT EXISTS idx_ebay_listings_session ON ebay_listings(session_id)",
       "CREATE INDEX IF NOT EXISTS idx_ebay_listings_status ON ebay_listings(status)",
-      "CREATE INDEX IF NOT EXISTS idx_ebay_listings_sku ON ebay_listings(sku)"
+      "CREATE INDEX IF NOT EXISTS idx_ebay_listings_sku ON ebay_listings(sku)",
+      # Stamp tables indexes (parallel to postal cards)
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_stamps_hash ON stamps(file_hash)",
+      "CREATE INDEX IF NOT EXISTS idx_stamps_type ON stamps(image_type)",
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_stamp_processing_stamp ON stamp_processing(stamp_id)",
+      "CREATE INDEX IF NOT EXISTS idx_ebay_stamp_listings_stamp ON ebay_stamp_listings(stamp_id)",
+      "CREATE INDEX IF NOT EXISTS idx_ebay_stamp_listings_session ON ebay_stamp_listings(session_id)",
+      "CREATE INDEX IF NOT EXISTS idx_ebay_stamp_listings_status ON ebay_stamp_listings(status)",
+      "CREATE INDEX IF NOT EXISTS idx_ebay_stamp_listings_sku ON ebay_stamp_listings(sku)"
     )
     
     for (index in indexes) {
@@ -308,6 +446,327 @@ initialize_tracking_db <- function(db_path = "inst/app/data/tracking.sqlite") {
     return(FALSE)
   })
 }
+
+#' Get or create stamp (identical to postal card logic)
+#' @param file_hash MD5 hash of the stamp image
+#' @param image_type Type ('face', 'verso', or 'combined')
+#' @param original_filename Original filename
+#' @param file_size File size in bytes
+#' @param dimensions Dimensions string (widthxheight)
+#' @return stamp_id
+#' @export
+get_or_create_stamp <- function(file_hash, image_type, original_filename, file_size, dimensions = NULL) {
+  tryCatch({
+    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    on.exit(DBI::dbDisconnect(con))
+
+    # Check for existing stamp (by hash only - same image file)
+    existing <- DBI::dbGetQuery(con,
+      "SELECT stamp_id, image_type FROM stamps WHERE file_hash = ?",
+      params = list(file_hash))
+
+    if (nrow(existing) > 0) {
+      # Update last_accessed
+      DBI::dbExecute(con,
+        "UPDATE stamps SET last_accessed = CURRENT_TIMESTAMP WHERE stamp_id = ?",
+        params = list(existing$stamp_id[1]))
+      message("✅ Found existing stamp: ", existing$stamp_id[1],
+              " (original type: ", existing$image_type[1], ", requested: ", image_type, ")")
+      return(existing$stamp_id[1])
+    }
+
+    # Parse dimensions - FIXED: Handle NULL properly
+    width <- NULL
+    height <- NULL
+    if (!is.null(dimensions) && is.character(dimensions) && grepl("x", dimensions)) {
+      dims <- strsplit(dimensions, "x")[[1]]
+      if (length(dims) == 2) {
+        width <- as.integer(dims[1])
+        height <- as.integer(dims[2])
+      }
+    }
+
+    # Create new stamp - FIXED: Use NA instead of NULL for SQL parameters
+    DBI::dbExecute(con,
+      "INSERT INTO stamps (file_hash, image_type, original_filename, file_size, width, height)
+       VALUES (?, ?, ?, ?, ?, ?)",
+      params = list(file_hash, image_type, original_filename, file_size, 
+                    if(is.null(width)) NA_integer_ else width, 
+                    if(is.null(height)) NA_integer_ else height))
+
+    new_stamp <- DBI::dbGetQuery(con,
+      "SELECT stamp_id FROM stamps WHERE file_hash = ? AND image_type = ?",
+      params = list(file_hash, image_type))
+
+    message("✅ Created new stamp: ", new_stamp$stamp_id[1])
+    return(new_stamp$stamp_id[1])
+
+  }, error = function(e) {
+    message("❌ Error in get_or_create_stamp: ", e$message)
+    return(NULL)
+  })
+}
+
+#' Save stamp processing (identical to postal card logic with stamp-specific fields)
+#' @param stamp_id Stamp ID
+#' @param crop_paths Vector of cropped image paths
+#' @param h_boundaries Horizontal boundaries
+#' @param v_boundaries Vertical boundaries
+#' @param grid_rows Number of rows
+#' @param grid_cols Number of columns
+#' @param extraction_dir Extraction directory
+#' @param ai_data List with AI extraction data
+#' @return Success status
+#' @export
+save_stamp_processing <- function(stamp_id, crop_paths = NULL, h_boundaries = NULL, 
+                                  v_boundaries = NULL, grid_rows = NULL, grid_cols = NULL, 
+                                  extraction_dir = NULL, ai_data = NULL) {
+  tryCatch({
+    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    on.exit(DBI::dbDisconnect(con))
+
+    # Convert to JSON - use NA_character_ instead of NULL for SQL compatibility
+    crop_paths_json <- if (!is.null(crop_paths)) jsonlite::toJSON(crop_paths) else NA_character_
+    h_boundaries_json <- if (!is.null(h_boundaries)) jsonlite::toJSON(h_boundaries) else NA_character_
+    v_boundaries_json <- if (!is.null(v_boundaries)) jsonlite::toJSON(v_boundaries) else NA_character_
+
+    # Convert grid parameters - use NA instead of NULL for SQL
+    grid_rows_na <- if (!is.null(grid_rows)) grid_rows else NA_integer_
+    grid_cols_na <- if (!is.null(grid_cols)) grid_cols else NA_integer_
+    extraction_dir_na <- if (!is.null(extraction_dir)) extraction_dir else NA_character_
+
+    # Check if processing exists
+    existing <- DBI::dbGetQuery(con,
+      "SELECT processing_id FROM stamp_processing WHERE stamp_id = ?",
+      params = list(stamp_id))
+
+    # Handle AI data - use NA_character_/NA_real_ instead of NULL for SQL
+    ai_title <- if (!is.null(ai_data$title)) ai_data$title else NA_character_
+    ai_description <- if (!is.null(ai_data$description)) ai_data$description else NA_character_
+    ai_condition <- if (!is.null(ai_data$condition)) ai_data$condition else NA_character_
+    ai_price <- if (!is.null(ai_data$price)) ai_data$price else NA_real_
+    ai_model <- if (!is.null(ai_data$model)) ai_data$model else NA_character_
+    ai_country <- if (!is.null(ai_data$country)) ai_data$country else NA_character_
+    ai_year <- if (!is.null(ai_data$year)) ai_data$year else NA_character_
+    ai_denomination <- if (!is.null(ai_data$denomination)) ai_data$denomination else NA_character_
+    ai_scott_number <- if (!is.null(ai_data$scott_number)) ai_data$scott_number else NA_character_
+    ai_perforation <- if (!is.null(ai_data$perforation)) ai_data$perforation else NA_character_
+    ai_watermark <- if (!is.null(ai_data$watermark)) ai_data$watermark else NA_character_
+    ai_grade <- if (!is.null(ai_data$grade)) ai_data$grade else NA_character_
+
+    if (nrow(existing) > 0) {
+      # Update existing (use COALESCE to keep existing values if new ones are NULL)
+      DBI::dbExecute(con,
+        "UPDATE stamp_processing SET
+         crop_paths = COALESCE(?, crop_paths),
+         h_boundaries = COALESCE(?, h_boundaries),
+         v_boundaries = COALESCE(?, v_boundaries),
+         grid_rows = COALESCE(?, grid_rows),
+         grid_cols = COALESCE(?, grid_cols),
+         extraction_dir = COALESCE(?, extraction_dir),
+         ai_title = COALESCE(?, ai_title),
+         ai_description = COALESCE(?, ai_description),
+         ai_condition = COALESCE(?, ai_condition),
+         ai_price = COALESCE(?, ai_price),
+         ai_model = COALESCE(?, ai_model),
+         ai_country = COALESCE(?, ai_country),
+         ai_year = COALESCE(?, ai_year),
+         ai_denomination = COALESCE(?, ai_denomination),
+         ai_scott_number = COALESCE(?, ai_scott_number),
+         ai_perforation = COALESCE(?, ai_perforation),
+         ai_watermark = COALESCE(?, ai_watermark),
+         ai_grade = COALESCE(?, ai_grade),
+         processed_timestamp = CURRENT_TIMESTAMP
+         WHERE stamp_id = ?",
+        params = list(
+          crop_paths_json, h_boundaries_json, v_boundaries_json,
+          grid_rows_na, grid_cols_na, extraction_dir_na,
+          ai_title, ai_description, ai_condition,
+          ai_price, ai_model,
+          ai_country, ai_year, ai_denomination,
+          ai_scott_number, ai_perforation, ai_watermark,
+          ai_grade, stamp_id
+        ))
+      message("✅ Updated stamp processing for stamp_id: ", stamp_id)
+    } else {
+      # Insert new
+      DBI::dbExecute(con,
+        "INSERT INTO stamp_processing (
+         stamp_id, crop_paths, h_boundaries, v_boundaries,
+         grid_rows, grid_cols, extraction_dir,
+         ai_title, ai_description, ai_condition, ai_price, ai_model,
+         ai_country, ai_year, ai_denomination, ai_scott_number,
+         ai_perforation, ai_watermark, ai_grade
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        params = list(
+          stamp_id, crop_paths_json, h_boundaries_json, v_boundaries_json,
+          grid_rows_na, grid_cols_na, extraction_dir_na,
+          ai_title, ai_description, ai_condition,
+          ai_price, ai_model,
+          ai_country, ai_year, ai_denomination,
+          ai_scott_number, ai_perforation, ai_watermark,
+          ai_grade
+        ))
+      message("✅ Created stamp processing for stamp_id: ", stamp_id)
+    }
+
+    return(TRUE)
+
+  }, error = function(e) {
+    message("❌ Error in save_stamp_processing: ", e$message)
+    return(FALSE)
+  })
+}
+
+#' Find stamp processing (identical to postal card logic)
+#' @param file_hash File hash
+#' @param image_type Image type ('face', 'verso', or 'combined')
+#' @return Data frame row with stamp processing details or NULL
+#' @export
+find_stamp_processing <- function(file_hash, image_type) {
+  tryCatch({
+    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    on.exit(DBI::dbDisconnect(con))
+
+
+    # Main query with LEFT JOIN (search by hash only, same image can have multiple types)
+    result <- DBI::dbGetQuery(con,
+      "SELECT s.stamp_id, s.file_hash, s.image_type, s.last_accessed,
+              sp.crop_paths, sp.h_boundaries, sp.v_boundaries,
+              sp.grid_rows, sp.grid_cols, sp.ai_title, sp.ai_description,
+              sp.ai_price, sp.ai_condition, sp.ai_model,
+              sp.ai_country, sp.ai_year, sp.ai_denomination,
+              sp.ai_scott_number, sp.ai_perforation, sp.ai_watermark, sp.ai_grade,
+              sp.processed_timestamp as last_processed
+       FROM stamps s
+       LEFT JOIN stamp_processing sp ON s.stamp_id = sp.stamp_id
+       WHERE s.file_hash = ?",
+      params = list(file_hash))
+
+    if (nrow(result) == 0) {
+      return(NULL)
+    }
+
+    # Parse JSON fields
+    row <- result[1, ]
+
+    # CRITICAL: If no processing record exists (LEFT JOIN returned all NAs), return NULL
+    # This happens when stamp exists but hasn't been processed yet
+    if (is.na(row$last_processed)) {
+      return(NULL)
+    }
+
+    # Parse JSON fields into temporary variables (to avoid data frame assignment errors)
+    crop_paths_parsed <- if (!is.na(row$crop_paths) && !is.null(row$crop_paths)) {
+      jsonlite::fromJSON(row$crop_paths)
+    } else {
+      character(0)
+    }
+
+    h_boundaries_parsed <- if (!is.na(row$h_boundaries) && !is.null(row$h_boundaries)) {
+      jsonlite::fromJSON(row$h_boundaries)
+    } else {
+      numeric(0)
+    }
+
+    v_boundaries_parsed <- if (!is.na(row$v_boundaries) && !is.null(row$v_boundaries)) {
+      jsonlite::fromJSON(row$v_boundaries)
+    } else {
+      numeric(0)
+    }
+
+    # Return as a list with parsed JSON fields
+    return(list(
+      stamp_id = row$stamp_id,
+      file_hash = row$file_hash,
+      image_type = row$image_type,
+      last_accessed = row$last_accessed,
+      crop_paths = crop_paths_parsed,
+      h_boundaries = h_boundaries_parsed,
+      v_boundaries = v_boundaries_parsed,
+      grid_rows = row$grid_rows,
+      grid_cols = row$grid_cols,
+      ai_title = row$ai_title,
+      ai_description = row$ai_description,
+      ai_price = row$ai_price,
+      ai_condition = row$ai_condition,
+      ai_model = row$ai_model,
+      ai_country = row$ai_country,
+      ai_year = row$ai_year,
+      ai_denomination = row$ai_denomination,
+      ai_scott_number = row$ai_scott_number,
+      ai_perforation = row$ai_perforation,
+      ai_watermark = row$ai_watermark,
+      ai_grade = row$ai_grade,
+      last_processed = row$last_processed
+    ))
+
+  }, error = function(e) {
+    message("❌ ERROR in find_stamp_processing: ", e$message)
+    return(NULL)
+  })
+}
+
+#' Save eBay stamp listing (tracking for stamps in eBay)
+#' @param stamp_id Stamp ID
+#' @param session_id Session ID
+#' @param ebay_item_id eBay item ID
+#' @param sku SKU
+#' @param title Listing title
+#' @param price Listing price
+#' @param status Listing status
+#' @param listing_url Listing URL
+#' @param ebay_offer_id eBay offer ID (optional)
+#' @param ebay_user_id eBay user ID (optional)
+#' @param ebay_username eBay username (optional)
+#' @return listing_id
+#' @export
+save_ebay_stamp_listing <- function(stamp_id, session_id, ebay_item_id, sku, title, price, 
+                                    status = "listed", listing_url = NULL, ebay_offer_id = NULL,
+                                    ebay_user_id = NULL, ebay_username = NULL) {
+  tryCatch({
+    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    on.exit(DBI::dbDisconnect(con))
+
+    DBI::dbExecute(con,
+      "INSERT INTO ebay_stamp_listings (
+        stamp_id, session_id, ebay_item_id, ebay_offer_id, ebay_user_id, ebay_username,
+        sku, status, title, price, listing_url, listed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+      params = list(stamp_id, session_id, ebay_item_id, ebay_offer_id, ebay_user_id, 
+                    ebay_username, sku, status, title, price, listing_url))
+
+    listing_id <- DBI::dbGetQuery(con, "SELECT last_insert_rowid() as id")$id
+
+    message("✅ Saved eBay stamp listing: ", listing_id)
+    return(listing_id)
+
+  }, error = function(e) {
+    message("❌ Error in save_ebay_stamp_listing: ", e$message)
+    return(NULL)
+  })
+}
+
+#' Track stamp session activity
+#' @param session_id Session ID
+#' @param stamp_id Stamp ID
+#' @param action Action performed
+#' @param details Additional details (optional)
+#' @return Success status
+#' @export
+track_stamp_activity <- function(session_id, stamp_id, action, details = NULL) {
+  # For now, just log to console since we don't have a stamp_activity table yet
+  # This prevents crashes while maintaining compatibility
+  tryCatch({
+    message("📊 Stamp Activity: ", action, " (stamp_id: ", stamp_id, ")")
+    return(TRUE)
+  }, error = function(e) {
+    message("⚠️ Error in track_stamp_activity: ", e$message)
+    return(FALSE)
+  })
+}
+
+message("✅ Stamp tracking functions loaded!")
 
 # ==== NEW 3-LAYER ARCHITECTURE FUNCTIONS ====
 

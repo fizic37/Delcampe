@@ -260,10 +260,44 @@ call_claude_api <- function(image_path, model_name, api_key, prompt, temperature
     }
     
   }, error = function(e) {
+    # Enhanced error reporting with more context
+    error_details <- list(
+      message = e$message,
+      class = class(e),
+      call = deparse(e$call)
+    )
+
+    # Try to extract more specific error information
+    detailed_error <- if (inherits(e, "httr2_http")) {
+      # HTTP-specific error
+      sprintf("HTTP Error: %s (Status: %s)", e$message, e$status %||% "unknown")
+    } else if (grepl("timeout", e$message, ignore.case = TRUE)) {
+      sprintf("Request Timeout: %s (Check internet connection or increase timeout)", e$message)
+    } else if (grepl("api[_-]?key", e$message, ignore.case = TRUE)) {
+      sprintf("API Key Error: %s (Check Settings tab for valid API key)", e$message)
+    } else if (grepl("host|resolve|connect", e$message, ignore.case = TRUE)) {
+      sprintf("Network Error: %s (Check internet connection)", e$message)
+    } else {
+      sprintf("Claude API Error: %s\nType: %s\nCall: %s",
+              e$message,
+              paste(class(e), collapse = ", "),
+              paste(deparse(e$call), collapse = " "))
+    }
+
+    # Log full error details to console for debugging
+    cat("\n❌ DETAILED ERROR:\n")
+    cat("   Message:", e$message, "\n")
+    cat("   Class:", paste(class(e), collapse = ", "), "\n")
+    cat("   Call:", paste(deparse(e$call), collapse = " "), "\n")
+    if (!is.null(e$parent)) {
+      cat("   Parent error:", e$parent$message, "\n")
+    }
+
     return(list(
       success = FALSE,
       content = NULL,
-      error = paste("Claude API call failed:", e$message)
+      error = detailed_error,
+      error_details = error_details
     ))
   })
 }
@@ -402,10 +436,44 @@ call_openai_api <- function(image_path, model_name, api_key, prompt, temperature
     }
     
   }, error = function(e) {
+    # Enhanced error reporting with more context
+    error_details <- list(
+      message = e$message,
+      class = class(e),
+      call = deparse(e$call)
+    )
+
+    # Try to extract more specific error information
+    detailed_error <- if (inherits(e, "httr2_http")) {
+      # HTTP-specific error
+      sprintf("HTTP Error: %s (Status: %s)", e$message, e$status %||% "unknown")
+    } else if (grepl("timeout", e$message, ignore.case = TRUE)) {
+      sprintf("Request Timeout: %s (Check internet connection or increase timeout)", e$message)
+    } else if (grepl("api[_-]?key", e$message, ignore.case = TRUE)) {
+      sprintf("API Key Error: %s (Check Settings tab for valid API key)", e$message)
+    } else if (grepl("host|resolve|connect", e$message, ignore.case = TRUE)) {
+      sprintf("Network Error: %s (Check internet connection)", e$message)
+    } else {
+      sprintf("OpenAI API Error: %s\nType: %s\nCall: %s",
+              e$message,
+              paste(class(e), collapse = ", "),
+              paste(deparse(e$call), collapse = " "))
+    }
+
+    # Log full error details to console for debugging
+    cat("\n❌ DETAILED ERROR:\n")
+    cat("   Message:", e$message, "\n")
+    cat("   Class:", paste(class(e), collapse = ", "), "\n")
+    cat("   Call:", paste(deparse(e$call), collapse = " "), "\n")
+    if (!is.null(e$parent)) {
+      cat("   Parent error:", e$parent$message, "\n")
+    }
+
     return(list(
       success = FALSE,
       content = NULL,
-      error = paste("OpenAI API call failed:", e$message)
+      error = detailed_error,
+      error_details = error_details
     ))
   })
 }
