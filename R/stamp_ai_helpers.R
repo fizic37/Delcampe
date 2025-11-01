@@ -79,22 +79,8 @@ build_stamp_prompt <- function(extraction_type = "individual", stamp_count = 1) 
       "   - Include currency symbol or abbreviation\n",
       "   - If multiple denominations, list primary one\n\n",
 
-      "7. SCOTT_NUMBER: Scott catalog number (if identifiable)\n",
-      "   - Format: Country abbreviation + number (e.g., US-1234, RO-567)\n",
-      "   - Only include if you are confident\n",
-      "   - If uncertain, omit this field\n\n",
-
-      "8. PERFORATION: Perforation type (e.g., Perf 12, Imperf, Rouletted)\n",
-      "   - Only if clearly visible and identifiable\n\n",
-
-      "9. WATERMARK: Watermark description (if visible)\n",
-      "   - Only if clearly visible (rare in photo analysis)\n\n",
-
-      "10. GRADE: Condition grade\n",
-      "   - Mint Never Hinged (MNH): Perfect, no hinge marks\n",
-      "   - Mint Hinged (MH): Perfect but has hinge remnant\n",
-      "   - Used: Postally used with cancellation\n",
-      "   - Unused: Not used but may have faults\n\n",
+      "NOTE: Do NOT assess condition/grade - seller will set this manually.\n",
+      "NOTE: Do NOT attempt to identify Scott catalog numbers, perforation types, or watermarks.\n\n",
 
       "FORMAT YOUR RESPONSE EXACTLY AS:\n",
       "TITLE: [your title]\n",
@@ -102,11 +88,7 @@ build_stamp_prompt <- function(extraction_type = "individual", stamp_count = 1) 
       "RECOMMENDED_PRICE: [numeric value]\n",
       "COUNTRY: [country name]\n",
       "YEAR: [year]\n",
-      "DENOMINATION: [value]\n",
-      "SCOTT_NUMBER: [catalog number]\n",
-      "PERFORATION: [type]\n",
-      "WATERMARK: [description]\n",
-      "GRADE: [condition]"
+      "DENOMINATION: [value]"
     )
   } else {
     # Individual stamp prompt (similar structure, singular references)
@@ -132,8 +114,7 @@ build_stamp_prompt <- function(extraction_type = "individual", stamp_count = 1) 
       "   - Year of issue (if visible)\n",
       "   - Denomination and currency\n",
       "   - Subject depicted (portrait, scene, symbol)\n",
-      "   - Perforations, watermarks, overprints\n",
-      "   - Scott catalog number (if identifiable)\n",
+      "   - Notable features (overprints, cancellations)\n",
       "   - Historical or collecting significance\n\n",
 
       "3. RECOMMENDED_PRICE: Suggested retail price in USD\n",
@@ -142,11 +123,10 @@ build_stamp_prompt <- function(extraction_type = "individual", stamp_count = 1) 
 
       "4. COUNTRY: Country of origin\n",
       "5. YEAR: Year of issue\n",
-      "6. DENOMINATION: Face value with currency\n",
-      "7. SCOTT_NUMBER: Scott catalog number\n",
-      "8. PERFORATION: Perforation type\n",
-      "9. WATERMARK: Watermark description\n",
-      "10. GRADE: Condition grade (MNH/MH/Used/Unused)\n\n",
+      "6. DENOMINATION: Face value with currency\n\n",
+
+      "NOTE: Do NOT assess condition/grade - seller will set this manually.\n",
+      "NOTE: Do NOT attempt to identify Scott catalog numbers, perforation types, or watermarks.\n\n",
 
       "Format your response EXACTLY as:\n",
       "TITLE: [your title]\n",
@@ -154,11 +134,7 @@ build_stamp_prompt <- function(extraction_type = "individual", stamp_count = 1) 
       "RECOMMENDED_PRICE: [numeric value]\n",
       "COUNTRY: [country name]\n",
       "YEAR: [year]\n",
-      "DENOMINATION: [value]\n",
-      "SCOTT_NUMBER: [catalog number]\n",
-      "PERFORATION: [type]\n",
-      "WATERMARK: [description]\n",
-      "GRADE: [condition]"
+      "DENOMINATION: [value]"
     )
   }
 
@@ -183,14 +159,14 @@ build_stamp_prompt_title_only <- function(extraction_type = "individual", stamp_
 
 "
 
-  base_prompt <- "You are an expert philatelist and stamp appraiser. Analyze this stamp image and provide TITLE and PRICE only.\n\n"
+  base_prompt <- "You are an expert philatelist and stamp appraiser. Analyze this stamp image carefully and provide:\n\n"
 
   if (extraction_type == "lot") {
     prompt <- paste0(ascii_instruction, base_prompt,
       "IMPORTANT: This is a lot of ", stamp_count, " stamps.\n",
       "The image shows BOTH SIDES of each stamp.\n\n",
 
-      "REQUIRED FIELDS (extract these only):\n\n",
+      "REQUIRED FIELDS:\n\n",
       "1. TITLE: eBay-optimized title (MAXIMUM 80 characters)\n",
       "   - ALL UPPERCASE format\n",
       "   - Format: COUNTRY - YEAR DENOMINATION TOPIC/TYPE FEATURES\n",
@@ -199,26 +175,48 @@ build_stamp_prompt_title_only <- function(extraction_type = "individual", stamp_
       "2. RECOMMENDED_PRICE: eBay sale price in USD for entire lot\n",
       "   - Format: numeric value only (e.g., 24.00)\n\n",
 
-      "3. GRADE: Condition (Used, Mint, MNH, etc.)\n\n",
+      "EBAY METADATA (extract when visible):\n\n",
+      "3. COUNTRY: Country of origin\n",
+      "4. YEAR: Year of issue\n",
+      "5. DENOMINATION: Face value\n\n",
+
+      "NOTE: DESCRIPTION and CONDITION fields are NOT needed - seller will provide their own.\n",
+      "NOTE: Do NOT attempt to identify Scott catalog numbers, perforation types, or watermarks.\n\n",
 
       "Format your response EXACTLY as:\n",
       "TITLE: [your title]\n",
       "RECOMMENDED_PRICE: [numeric value]\n",
-      "GRADE: [condition]"
+      "COUNTRY: [country or omit if not visible]\n",
+      "YEAR: [year or omit if not visible]\n",
+      "DENOMINATION: [value or omit if not visible]"
     )
   } else {
     prompt <- paste0(ascii_instruction, base_prompt,
       "Analyze this individual stamp.\n\n",
 
-      "REQUIRED FIELDS (extract these only):\n\n",
-      "1. TITLE: eBay-optimized title (MAXIMUM 80 characters)\n\n",
-      "2. RECOMMENDED_PRICE: eBay sale price in USD\n\n",
-      "3. GRADE: Condition\n\n",
+      "REQUIRED FIELDS:\n\n",
+      "1. TITLE: eBay-optimized title (MAXIMUM 80 characters)\n",
+      "   - ALL UPPERCASE format\n",
+      "   - Format: COUNTRY - YEAR DENOMINATION TOPIC/TYPE\n",
+      "   - Example: 'ROMANIA - 1920 5 LEI FERDINAND SCOTT 245'\n\n",
+
+      "2. RECOMMENDED_PRICE: eBay sale price in USD\n",
+      "   - Format: numeric value only (e.g., 3.50)\n\n",
+
+      "EBAY METADATA (extract when visible):\n\n",
+      "3. COUNTRY: Country of origin (e.g., Romania, USA)\n",
+      "4. YEAR: Year of issue (e.g., 1920)\n",
+      "5. DENOMINATION: Face value (e.g., 5 LEI, 10c)\n\n",
+
+      "NOTE: DESCRIPTION and CONDITION fields are NOT needed - seller will provide their own.\n",
+      "NOTE: Do NOT attempt to identify Scott catalog numbers, perforation types, or watermarks.\n\n",
 
       "Format your response EXACTLY as:\n",
       "TITLE: [your title]\n",
       "RECOMMENDED_PRICE: [numeric value]\n",
-      "GRADE: [condition]"
+      "COUNTRY: [country or omit if not visible]\n",
+      "YEAR: [year or omit if not visible]\n",
+      "DENOMINATION: [value or omit if not visible]"
     )
   }
 
@@ -254,10 +252,10 @@ parse_stamp_response <- function(response_text) {
     country = extract_field(response_text, "COUNTRY"),
     year = as.integer(extract_field(response_text, "YEAR")),
     denomination = extract_field(response_text, "DENOMINATION"),
-    scott_number = extract_field(response_text, "SCOTT_NUMBER"),
-    perforation = extract_field(response_text, "PERFORATION"),
-    watermark = extract_field(response_text, "WATERMARK"),
-    grade = extract_field(response_text, "GRADE")
+    scott_number = NA_character_,  # Not extracted by AI - manual entry only
+    perforation = NA_character_,   # Not extracted by AI - manual entry only
+    watermark = NA_character_,     # Not extracted by AI - manual entry only
+    grade = "used"  # Always default to "used" - seller will change manually if needed
   )
 
   return(result)

@@ -390,7 +390,7 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
           )
         ),
 
-        # Row 5: Reserve Price (4 cols) + Year (4 cols) + Era (4 cols)
+        # Row 5: Reserve Price (4 cols) + Year (4 cols) + Country (4 cols)
         fluidRow(
           # Reserve Price (conditional - shown only for auctions)
           column(
@@ -412,40 +412,7 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
             textInput(
               ns(paste0("year_", idx)),
               "Year",
-              placeholder = "e.g., 1957",
-              width = "100%"
-            )
-          ),
-          column(
-            4,
-            selectInput(
-              ns(paste0("era_", idx)),
-              "Era",
-              choices = c(
-                "Not specified" = "",
-                "Undivided Back (pre-1907)" = "Undivided Back",
-                "Divided Back (1907-1915)" = "Divided Back",
-                "Linen (1930-1945)" = "Linen",
-                "Chrome (1939+)" = "Chrome"
-              ),
-              selected = "",
-              width = "100%"
-            )
-          )
-        ),
-
-        # eBay Metadata Section Header
-        tags$hr(style = "margin-top: 20px; margin-bottom: 10px;"),
-        tags$h5("eBay Metadata (Optional)", style = "margin-bottom: 10px; color: #495057;"),
-
-        # Row 6: City (4 cols) + Country (4 cols) + Region (4 cols)
-        fluidRow(
-          column(
-            4,
-            textInput(
-              ns(paste0("city_", idx)),
-              "City",
-              placeholder = "e.g., Buzias",
+              placeholder = "e.g., 1920",
               width = "100%"
             )
           ),
@@ -457,27 +424,67 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
               placeholder = "e.g., Romania",
               width = "100%"
             )
-          ),
-          column(
-            4,
-            textInput(
-              ns(paste0("region_", idx)),
-              "Region/County",
-              placeholder = "e.g., Timis County",
-              width = "100%"
-            )
           )
         ),
 
-        # Row 7: Theme Keywords (full width)
+        # Stamp-Specific Metadata Section Header
+        tags$hr(style = "margin-top: 20px; margin-bottom: 10px;"),
+        tags$h5("Stamp Metadata (Optional)", style = "margin-bottom: 10px; color: #495057;"),
+
+        # Row 6: Denomination (4 cols) + Scott Number (4 cols) + Perforation (4 cols)
+        fluidRow(
+          column(
+            4,
+            textInput(
+              ns(paste0("denomination_", idx)),
+              "Denomination",
+              placeholder = "e.g., 5 LEI, 10c",
+              width = "100%"
+            )
+          ),
+          column(
+            12,
+            tags$div(
+              style = "border-left: 3px solid #9370DB; padding-left: 10px; margin-top: 10px;",
+              tags$label("Advanced Philatelic Details (Manual Entry Only)", style = "font-weight: bold; color: #9370DB;"),
+              tags$small("Scott Number, Perforation, Watermark - fill in if you know them", style = "color: #666; display: block; margin-bottom: 10px;")
+            )
+          )
+        ),
         fluidRow(
           column(
             12,
-            textInput(
-              ns(paste0("theme_keywords_", idx)),
-              "Theme Keywords",
-              placeholder = "e.g., view, town, church",
-              width = "100%"
+            textAreaInput(
+              ns(paste0("scott_number_", idx)),
+              "Scott Catalog Number",
+              value = "",
+              placeholder = "e.g., US-1234, RO-567",
+              width = "100%",
+              rows = 1
+            )
+          )
+        ),
+        fluidRow(
+          column(
+            6,
+            textAreaInput(
+              ns(paste0("perforation_", idx)),
+              "Perforation Type",
+              value = "",
+              placeholder = "e.g., Perf 12, Imperf, Rouletted",
+              width = "100%",
+              rows = 1
+            )
+          ),
+          column(
+            6,
+            textAreaInput(
+              ns(paste0("watermark_", idx)),
+              "Watermark",
+              value = "",
+              placeholder = "e.g., Crown, Star, None visible",
+              width = "100%",
+              rows = 1
             )
           )
         ),
@@ -868,29 +875,31 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
                   cat("   ✓ Year populated\n")
                 }
 
-                if (!is.null(ai_data$ai_era) && !is.na(ai_data$ai_era) && ai_data$ai_era != "") {
-                  updateSelectInput(session, paste0("era_", i), selected = ai_data$ai_era)
-                  cat("   ✓ Era populated\n")
-                }
-
-                if (!is.null(ai_data$ai_city) && !is.na(ai_data$ai_city) && ai_data$ai_city != "") {
-                  updateTextInput(session, paste0("city_", i), value = ai_data$ai_city)
-                  cat("   ✓ City populated\n")
-                }
-
                 if (!is.null(ai_data$ai_country) && !is.na(ai_data$ai_country) && ai_data$ai_country != "") {
                   updateTextInput(session, paste0("country_", i), value = ai_data$ai_country)
                   cat("   ✓ Country populated\n")
                 }
 
-                if (!is.null(ai_data$ai_region) && !is.na(ai_data$ai_region) && ai_data$ai_region != "") {
-                  updateTextInput(session, paste0("region_", i), value = ai_data$ai_region)
-                  cat("   ✓ Region populated\n")
+                # Stamp-specific metadata fields
+                if (!is.null(ai_data$ai_denomination) && !is.na(ai_data$ai_denomination) && ai_data$ai_denomination != "") {
+                  updateTextInput(session, paste0("denomination_", i), value = ai_data$ai_denomination)
+                  cat("   ✓ Denomination populated\n")
                 }
 
-                if (!is.null(ai_data$ai_theme_keywords) && !is.na(ai_data$ai_theme_keywords) && ai_data$ai_theme_keywords != "") {
-                  updateTextInput(session, paste0("theme_keywords_", i), value = ai_data$ai_theme_keywords)
-                  cat("   ✓ Theme keywords populated\n")
+                # Advanced fields - only populate from database if previously manually entered
+                if (!is.null(ai_data$ai_scott_number) && !is.na(ai_data$ai_scott_number) && ai_data$ai_scott_number != "") {
+                  updateTextAreaInput(session, paste0("scott_number_", i), value = ai_data$ai_scott_number)
+                  cat("   ✓ Scott Number populated (manual entry)\n")
+                }
+
+                if (!is.null(ai_data$ai_perforation) && !is.na(ai_data$ai_perforation) && ai_data$ai_perforation != "") {
+                  updateTextAreaInput(session, paste0("perforation_", i), value = ai_data$ai_perforation)
+                  cat("   ✓ Perforation populated (manual entry)\n")
+                }
+
+                if (!is.null(ai_data$ai_watermark) && !is.na(ai_data$ai_watermark) && ai_data$ai_watermark != "") {
+                  updateTextAreaInput(session, paste0("watermark_", i), value = ai_data$ai_watermark)
+                  cat("   ✓ Watermark populated (manual entry)\n")
                 }
 
                 # Show success status
@@ -1062,21 +1071,25 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
               cat("   ✅ Using file path:", actual_path, "\n")
               cat("   Image type:", image_type, "\n")
 
-              # Build prompt - change based on fetch_description checkbox
+              # CONDITIONAL PROMPT SELECTION based on checkbox
+              # If checkbox is checked: full prompt (description + metadata)
+              # If checkbox is unchecked: minimal prompt (title + price + grade only) - saves ~70% tokens
               prompt <- if (fetch_description) {
+                cat("   Using FULL prompt (description requested)\n")
                 # Full prompt with description request
                 build_stamp_prompt(
                   extraction_type = if(image_type == "lot") "lot" else if(image_type == "combined") "combined" else "individual",
                   stamp_count = 1
                 )
               } else {
+                cat("   Using MINIMAL prompt (title/price/grade only - saves tokens)\n")
                 # Title-only prompt (skip description to save tokens)
                 build_stamp_prompt_title_only(
                   extraction_type = if(image_type == "lot") "lot" else if(image_type == "combined") "combined" else "individual",
                   stamp_count = 1
                 )
               }
-              
+
               cat("   Prompt built, calling API...\n")
 
               # Update notification
@@ -1166,14 +1179,9 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
                     cat("      Year updated:", parsed$year, "\n")
                   }
 
-                  if (!is.null(parsed$era) && !is.na(parsed$era) && parsed$era != "") {
-                    updateSelectInput(session, paste0("era_", i), selected = parsed$era)
-                    cat("      Era updated:", parsed$era, "\n")
-                  }
-
-                  if (!is.null(parsed$city) && !is.na(parsed$city) && parsed$city != "") {
-                    updateTextInput(session, paste0("city_", i), value = parsed$city)
-                    cat("      City updated:", parsed$city, "\n")
+                  if (!is.null(parsed$denomination) && !is.na(parsed$denomination) && parsed$denomination != "") {
+                    updateTextInput(session, paste0("denomination_", i), value = parsed$denomination)
+                    cat("      Denomination updated:", parsed$denomination, "\n")
                   }
 
                   if (!is.null(parsed$country) && !is.na(parsed$country) && parsed$country != "") {
@@ -1181,15 +1189,8 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
                     cat("      Country updated:", parsed$country, "\n")
                   }
 
-                  if (!is.null(parsed$region) && !is.na(parsed$region) && parsed$region != "") {
-                    updateTextInput(session, paste0("region_", i), value = parsed$region)
-                    cat("      Region updated:", parsed$region, "\n")
-                  }
-
-                  if (!is.null(parsed$theme_keywords) && !is.na(parsed$theme_keywords) && parsed$theme_keywords != "") {
-                    updateTextInput(session, paste0("theme_keywords_", i), value = parsed$theme_keywords)
-                    cat("      Theme keywords updated:", parsed$theme_keywords, "\n")
-                  }
+                  # NOTE: Scott number, perforation, and watermark are NOT populated by AI
+                  # These are manual-entry fields only (AI cannot reliably extract them from photos)
 
                   cat("   ✅ Form fields updated\n")
                 }, delay = 0.1)
@@ -1256,11 +1257,21 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
 
                       cat("   Step 4: Preparing AI data to save\n")
 
+                      # Determine which description to save based on checkbox
+                      description_to_save <- if (fetch_description) {
+                        # AI-generated description (from full prompt)
+                        parsed$description
+                      } else {
+                        # Template description (checkbox unchecked - minimal prompt)
+                        build_template_description(parsed$title)
+                      }
+
                       # Save AI data to stamp_processing table (stamp-specific fields)
                       ai_data <- list(
                         title = parsed$title,
-                        description = parsed$description,
-                        condition = parsed$grade,  # Stamp field: grade instead of condition
+                        description = description_to_save,  # Conditional description
+                        condition = parsed$grade,  # For ai_condition column
+                        grade = parsed$grade,      # For ai_grade column (both set to "used")
                         price = parsed$recommended_price,  # Stamp field: recommended_price instead of price
                         model = if(selected_model == "claude") config$default_model else "gpt-4o",
                         year = parsed$year,
@@ -1574,11 +1585,11 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
 
           # Get metadata inputs
           year <- input[[paste0("year_", i)]]
-          era <- input[[paste0("era_", i)]]
-          city <- input[[paste0("city_", i)]]
+          denomination <- input[[paste0("denomination_", i)]]
+          scott_number <- input[[paste0("scott_number_", i)]]
           country <- input[[paste0("country_", i)]]
-          region <- input[[paste0("region_", i)]]
-          theme_keywords <- input[[paste0("theme_keywords_", i)]]
+          perforation <- input[[paste0("perforation_", i)]]
+          watermark <- input[[paste0("watermark_", i)]]
 
           # Get auction-specific inputs
           duration <- if (listing_type == "auction") {
@@ -1637,11 +1648,11 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
             price = price,
             condition = condition,
             year = year,
-            era = era,
-            city = city,
+            denomination = denomination,
+            scott_number = scott_number,
             country = country,
-            region = region,
-            theme_keywords = theme_keywords
+            perforation = perforation,
+            watermark = watermark
           )
 
           # Get image file path (using sorted arrays)

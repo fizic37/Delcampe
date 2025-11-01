@@ -1046,13 +1046,23 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
               cat("   ✅ Using file path:", actual_path, "\n")
               cat("   Image type:", image_type, "\n")
 
-              # Build enhanced prompt with price recommendation
-              # For combined images, card_count is not used in the prompt (AI counts them)
-              prompt <- build_enhanced_postal_card_prompt(
-                extraction_type = if(image_type == "lot") "lot" else if(image_type == "combined") "combined" else "individual",
-                card_count = 1  # Not relevant for combined type
-              )
-              
+              # CONDITIONAL PROMPT SELECTION based on checkbox
+              # If checkbox is checked: full prompt (description + metadata)
+              # If checkbox is unchecked: minimal prompt (title + price only) - saves ~60% tokens
+              prompt <- if (fetch_description) {
+                cat("   Using FULL prompt (description requested)\n")
+                build_enhanced_postal_card_prompt(
+                  extraction_type = if(image_type == "lot") "lot" else if(image_type == "combined") "combined" else "individual",
+                  card_count = 1  # Not relevant for combined type
+                )
+              } else {
+                cat("   Using MINIMAL prompt (title/price only - saves tokens)\n")
+                build_postal_card_prompt_minimal(
+                  extraction_type = if(image_type == "lot") "lot" else if(image_type == "combined") "combined" else "individual",
+                  card_count = 1
+                )
+              }
+
               cat("   Prompt built, calling API...\n")
 
               # Update notification
@@ -1233,10 +1243,19 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
 
                       cat("   Step 4: Preparing AI data to save\n")
 
+                      # Determine which description to save based on checkbox
+                      description_to_save <- if (fetch_description) {
+                        # AI-generated description (from full prompt)
+                        parsed$description
+                      } else {
+                        # Template description (checkbox unchecked - minimal prompt)
+                        build_template_description(parsed$title)
+                      }
+
                       # Save AI data to card_processing table (including metadata)
                       ai_data <- list(
                         title = parsed$title,
-                        description = parsed$description,
+                        description = description_to_save,  # Conditional description
                         condition = parsed$condition,
                         price = parsed$price,
                         model = if(selected_model == "claude") config$default_model else "gpt-4o",

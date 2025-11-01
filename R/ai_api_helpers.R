@@ -749,8 +749,169 @@ build_enhanced_postal_card_prompt <- function(extraction_type = "individual", ca
   return(prompt)
 }
 
+#' Build Minimal Postal Card Prompt (All Fields Except Description)
+#'
+#' Creates a streamlined prompt that requests all metadata fields EXCEPT the
+#' AI-generated description. This saves tokens while preserving important eBay metadata.
+#' User will get a template description instead of AI-generated one.
+#'
+#' @param extraction_type Character: "individual", "lot", or "combined"
+#' @param card_count Integer: Number of cards in lot (if lot type)
+#' @return Character: Minimal AI prompt
+#' @noRd
+build_postal_card_prompt_minimal <- function(extraction_type = "individual", card_count = 1) {
+
+  # CRITICAL: ASCII-only instruction at the top
+  ascii_instruction <- "IMPORTANT: Use ONLY ASCII characters in your output. Replace all diacritics:
+- Romanian: ă→a, â→a, î→i, ș→s, ț→t
+- European: é→e, è→e, ü→u, ö→o, ñ→n, ç→c
+- Examples: București → Bucuresti, Buziaș → Buzias, café → cafe, Timișoara → Timisoara
+
+"
+
+  base_prompt <- "You are an expert postal history analyst and vintage postcard appraiser. Analyze this image carefully and provide:\n\n"
+
+  if (extraction_type == "lot") {
+    prompt <- paste0(ascii_instruction, base_prompt,
+      "IMPORTANT: This is a lot of ", card_count, " postal cards.\n",
+      "The image shows BOTH SIDES of each card:\n",
+      "- TOP ROW: Front/face sides (", card_count, " images)\n",
+      "- BOTTOM ROW: Back/verso sides (", card_count, " images)\n",
+      "- TOTAL POSTCARDS: ", card_count, " (not ", card_count * 2, "!)\n\n",
+
+      "REQUIRED FIELDS:\n\n",
+      "1. TITLE: eBay-optimized title (MAXIMUM 80 characters)\n",
+      "   - ALL UPPERCASE format\n",
+      "   - Use dashes (-) to separate sections\n",
+      "   - ASCII only (e.g., Buzias not Buziaș)\n",
+      "   - Element order: COUNTRY - YEAR TYPE LOCATION FEATURES\n",
+      "   - Front-load important search terms (country, year, city)\n",
+      "   - Examples:\n",
+      "     * 'AUSTRIA - 1912 PARCEL POST ROMANIA REICHENBERG PERFIN REVENUE'\n",
+      "     * 'ROMANIA - POSTAL HISTORY LOT FERDINAND ARAD FOCSANI IASI'\n",
+      "     * 'FRANCE - 1920s PARIS VIEWS EIFFEL TOWER NOTRE DAME LOT 5'\n\n",
+
+      "2. RECOMMENDED_PRICE: eBay sale price in USD for entire lot\n",
+      "   - Price for ALL ", card_count, " postcards combined\n",
+      "   - Typical range per card: $2.00 - $12.00\n",
+      "   - Format: numeric value only (e.g., 15.00 for 3 cards at $5 each)\n\n",
+
+      "EBAY METADATA (extract from most prominent/clear card):\n",
+      "IMPORTANT: These fields improve eBay search ranking - extract when visible!\n\n",
+
+      "3. YEAR: Year visible on any postcard or postmark (e.g., 1957)\n",
+      "4. ERA: Postcard era (pre-1907: Undivided Back, 1907-1915: Divided Back, 1930-1945: Linen, 1939+: Chrome)\n",
+      "5. CITY: City/town name visible (ASCII only)\n",
+      "6. COUNTRY: Country name (e.g., Romania, France)\n",
+      "7. REGION: State/region/county if visible (ASCII only)\n",
+      "8. THEME_KEYWORDS: Keywords for theme (e.g., view, town, church)\n\n",
+
+      "NOTE: DESCRIPTION field is NOT needed - seller will provide their own.\n\n",
+
+      "Format your response EXACTLY as:\n",
+      "TITLE: [title here]\n",
+      "PRICE: [numeric value]\n",
+      "YEAR: [year or omit if not visible]\n",
+      "ERA: [era or omit if no year]\n",
+      "CITY: [city or omit if not visible]\n",
+      "COUNTRY: [country or omit if not visible]\n",
+      "REGION: [region or omit if not visible]\n",
+      "THEME_KEYWORDS: [keywords or omit if not identifiable]"
+    )
+  } else if (extraction_type == "combined") {
+    # Combined face+verso image
+    prompt <- paste0(ascii_instruction, base_prompt,
+      "IMPORTANT: This image shows ONE postcard with BOTH SIDES:\n",
+      "- Left side: Face (front showing the picture/view)\n",
+      "- Right side: Verso (back showing the address/message area)\n",
+      "You are analyzing 1 postcard, not 2 separate cards.\n\n",
+
+      "REQUIRED FIELDS:\n\n",
+      "1. TITLE: eBay-optimized title (MAXIMUM 80 characters)\n",
+      "   - ALL UPPERCASE format\n",
+      "   - Use dashes (-) to separate sections\n",
+      "   - ASCII only (e.g., Buzias not Buziaș)\n",
+      "   - Element order: COUNTRY - YEAR TYPE LOCATION FEATURES\n",
+      "   - Extract from BOTH face and verso sides\n",
+      "   - Include postmarks, cancellations, visible routes\n",
+      "   - Examples:\n",
+      "     * 'ROMANIA - 1905 BUZIAS TIMIS POSTMARK UNDIVIDED BACK BATHS'\n",
+      "     * 'AUSTRIA - 1910 WIEN RINGSTRASSE TRAM POSTED PRAGUE'\n\n",
+
+      "2. RECOMMENDED_PRICE: eBay sale price in USD\n",
+      "   - Consider age (older = more valuable)\n",
+      "   - Typical range: $2.00 - $12.00\n",
+      "   - Format: numeric value only (e.g., 3.50)\n\n",
+
+      "EBAY METADATA (OPTIONAL - from the postcard):\n\n",
+      "3. YEAR: Year visible on postcard or postmark (e.g., 1957)\n",
+      "4. ERA: Postcard era (pre-1907: Undivided Back, 1907-1915: Divided Back, 1930-1945: Linen, 1939+: Chrome)\n",
+      "5. CITY: City/town name visible (ASCII only)\n",
+      "6. COUNTRY: Country name (e.g., Romania)\n",
+      "7. REGION: State/region/county if visible (ASCII only)\n",
+      "8. THEME_KEYWORDS: Keywords for theme (e.g., view, town, church)\n\n",
+
+      "NOTE: DESCRIPTION field is NOT needed - seller will provide their own.\n\n",
+
+      "Format your response EXACTLY as:\n",
+      "TITLE: [title here]\n",
+      "PRICE: [numeric value]\n",
+      "YEAR: [year or omit if not visible]\n",
+      "ERA: [era or omit if no year]\n",
+      "CITY: [city or omit if not visible]\n",
+      "COUNTRY: [country or omit if not visible]\n",
+      "REGION: [region or omit if not visible]\n",
+      "THEME_KEYWORDS: [keywords or omit if not identifiable]"
+    )
+  } else {
+    # Individual image
+    prompt <- paste0(ascii_instruction, base_prompt,
+      "REQUIRED FIELDS:\n\n",
+      "1. TITLE: eBay-optimized title (MAXIMUM 80 characters)\n",
+      "   - ALL UPPERCASE format\n",
+      "   - Use dashes (-) to separate sections\n",
+      "   - ASCII only (e.g., Buzias not Buziaș)\n",
+      "   - Element order: COUNTRY - YEAR TYPE LOCATION FEATURES\n",
+      "   - Look for postmarks, cancellations, special markings\n",
+      "   - Include visible postal routes or destinations\n",
+      "   - Examples:\n",
+      "     * 'ROMANIA - 1905 BUZIAS TIMIS POSTMARK UNDIVIDED BACK BATHS'\n",
+      "     * 'FRANCE - 1898 EXPOSITION UNIVERSELLE EIFFEL TOWER EARLY'\n",
+      "     * 'AUSTRIA - 1910 WIEN VIENNA RINGSTRASSE TRAM POSTED PRAGUE'\n\n",
+
+      "2. RECOMMENDED_PRICE: eBay sale price in USD\n",
+      "   - Consider age (older = more valuable)\n",
+      "   - Consider subject (tourist landmarks > generic scenes)\n",
+      "   - Typical range: $2.00 - $12.00\n",
+      "   - Format: numeric value only (e.g., 3.50)\n\n",
+
+      "EBAY METADATA (OPTIONAL - provide if visible on postcard):\n\n",
+      "3. YEAR: Year visible on postcard or postmark (e.g., 1957)\n",
+      "4. ERA: Postcard era (pre-1907: Undivided Back, 1907-1915: Divided Back, 1930-1945: Linen, 1939+: Chrome)\n",
+      "5. CITY: City/town name visible (ASCII only)\n",
+      "6. COUNTRY: Country name (e.g., Romania, France, Germany)\n",
+      "7. REGION: State/region/county if visible (ASCII only)\n",
+      "8. THEME_KEYWORDS: Keywords for theme (e.g., view, town, church, landscape, railway)\n\n",
+
+      "NOTE: DESCRIPTION field is NOT needed - seller will provide their own.\n\n",
+
+      "Format your response EXACTLY as:\n",
+      "TITLE: [title here]\n",
+      "PRICE: [numeric value]\n",
+      "YEAR: [year or omit if not visible]\n",
+      "ERA: [era or omit if no year]\n",
+      "CITY: [city or omit if not visible]\n",
+      "COUNTRY: [country or omit if not visible]\n",
+      "REGION: [region or omit if not visible]\n",
+      "THEME_KEYWORDS: [keywords or omit if not identifiable]"
+    )
+  }
+
+  return(prompt)
+}
+
 #' Parse AI Response for Title and Description
-#' 
+#'
 #' @param ai_response Raw text response from AI
 #' @return List with title and description
 #' @noRd
