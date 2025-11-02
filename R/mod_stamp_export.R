@@ -427,6 +427,68 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
           )
         ),
 
+        # Row 6: Scheduling Controls
+        tags$hr(style = "margin-top: 20px; margin-bottom: 10px;"),
+        tags$h5("Listing Schedule", style = "margin-bottom: 10px; color: #495057;"),
+
+        fluidRow(
+          column(
+            3,
+            checkboxInput(
+              ns(paste0("list_immediately_", idx)),
+              "List Immediately (skip scheduling)",
+              value = FALSE
+            )
+          ),
+          column(
+            3,
+            conditionalPanel(
+              condition = sprintf("!input['%s']", ns(paste0("list_immediately_", idx))),
+              dateInput(
+                ns(paste0("schedule_date_", idx)),
+                "Start Date (Pacific)",
+                value = Sys.Date(),
+                min = Sys.Date(),
+                max = Sys.Date() + 21,
+                width = "100%"
+              )
+            )
+          ),
+          column(
+            2,
+            conditionalPanel(
+              condition = sprintf("!input['%s']", ns(paste0("list_immediately_", idx))),
+              selectInput(
+                ns(paste0("schedule_hour_", idx)),
+                "Hour",
+                choices = sprintf("%02d", 0:23),
+                selected = "10",
+                width = "100%"
+              )
+            )
+          ),
+          column(
+            2,
+            conditionalPanel(
+              condition = sprintf("!input['%s']", ns(paste0("list_immediately_", idx))),
+              selectInput(
+                ns(paste0("schedule_minute_", idx)),
+                "Minute",
+                choices = sprintf("%02d", c(0, 15, 30, 45)),
+                selected = "00",
+                width = "100%"
+              )
+            )
+          ),
+          column(
+            2,
+            conditionalPanel(
+              condition = sprintf("!input['%s']", ns(paste0("list_immediately_", idx))),
+              uiOutput(ns(paste0("schedule_display_", idx)))
+            )
+          )
+        ),
+
         # Stamp-Specific Metadata Section Header
         tags$hr(style = "margin-top: 20px; margin-bottom: 10px;"),
         tags$h5("Stamp Metadata (Optional)", style = "margin-bottom: 10px; color: #495057;"),
@@ -512,7 +574,8 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
     # idx: Image index for unique button identification
     show_ebay_confirmation_modal <- function(idx, title, price, condition, category = "Stamps",
                                              listing_type = "fixed_price", duration = "GTC",
-                                             buy_it_now = NULL, reserve = NULL) {
+                                             buy_it_now = NULL, reserve = NULL,
+                                             schedule_time = NULL) {
       button_id <- ns(paste0("confirm_send_to_ebay_", idx))
 
       cat("   Creating modal with button ID:", button_id, "\n")
@@ -574,7 +637,36 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
             tags$dd(class = "col-sm-9", condition),
 
             tags$dt(class = "col-sm-3", "Category:"),
-            tags$dd(class = "col-sm-9", category)
+            tags$dd(class = "col-sm-9", category),
+
+            # Schedule display
+            if (!is.null(schedule_time)) {
+              tagList(
+                tags$dt(class = "col-sm-3", "Scheduled Start:"),
+                tags$dd(
+                  class = "col-sm-9",
+                  tags$pre(
+                    style = "font-size: 0.9em; margin: 0; white-space: pre-wrap;",
+                    format_display_time(schedule_time)
+                  ),
+                  tags$br(),
+                  tags$small(
+                    style = "color: #856404;",
+                    "⚠️ Listing will NOT be visible on eBay until scheduled time"
+                  ),
+                  tags$br(),
+                  tags$small(
+                    style = "color: #856404;",
+                    "💵 eBay charges $0.10 scheduling fee"
+                  )
+                )
+              )
+            } else {
+              tagList(
+                tags$dt(class = "col-sm-3", "Start Time:"),
+                tags$dd(class = "col-sm-9", "Immediately after creation")
+              )
+            }
           ),
 
           footer = tagList(
@@ -1464,6 +1556,93 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
       sorted_paths <- sort_images_lot_first(paths)
 
       lapply(seq_along(sorted_paths), function(i) {
+        # Observer: Set default schedule time when accordion opens
+        observe({
+          # Only run once when image paths are available
+          req(image_paths())
+          req(length(image_paths()) >= i)
+
+          # Calculate next 10:00 AM Pacific
+          next_10am <- calculate_next_10am_pacific()
+
+          # Convert to Pacific timezone for UI display
+          pacific_time <- as.POSIXct(
+            format(next_10am, tz = "America/Los_Angeles"),
+            tz = "America/Los_Angeles"
+          )
+
+          # Update date input
+          updateDateInput(
+            session,
+            paste0("schedule_date_", i),
+            value = as.Date(pacific_time)
+          )
+
+          # Update hour select (should be "10")
+          updateSelectInput(
+            session,
+            paste0("schedule_hour_", i),
+            selected = sprintf("%02d", as.integer(format(pacific_time, "%H")))
+          )
+
+          # Update minute select (should be "00")
+          updateSelectInput(
+            session,
+            paste0("schedule_minute_", i),
+            selected = sprintf("%02d", as.integer(format(pacific_time, "%M")))
+          )
+
+          cat("   ✅ Default schedule set for image", i, ":",
+              format(pacific_time, "%Y-%m-%d %H:%M %Z"), "\n")
+        })
+
+        # Dynamic schedule display: Show Pacific and Romania times
+        output[[paste0("schedule_display_", i)]] <- renderUI({
+          # Require schedule inputs to be set
+          req(input[[paste0("schedule_date_", i)]])
+          req(input[[paste0("schedule_hour_", i)]])
+          req(input[[paste0("schedule_minute_", i)]])
+
+          # Build Pacific time from user inputs
+          pacific_str <- sprintf(
+            "%s %s:%s:00",
+            input[[paste0("schedule_date_", i)]],
+            input[[paste0("schedule_hour_", i)]],
+            input[[paste0("schedule_minute_", i)]]
+          )
+
+          # Parse as Pacific time
+          pacific_time <- as.POSIXct(
+            pacific_str,
+            tz = "America/Los_Angeles",
+            format = "%Y-%m-%d %H:%M:%S"
+          )
+
+          # Convert to UTC
+          utc_time <- as.POSIXct(format(pacific_time, tz = "UTC"), tz = "UTC")
+
+          # Convert to Romania time
+          romania_time <- as.POSIXct(
+            format(utc_time, tz = "Europe/Bucharest"),
+            tz = "Europe/Bucharest"
+          )
+
+          # Render display
+          div(
+            style = "margin-top: 10px; font-size: 0.85em; padding: 8px; background-color: #d1ecf1; border-radius: 4px;",
+            strong("Scheduled Start:"),
+            tags$br(),
+            sprintf("🇺🇸 Pacific: %s", format(pacific_time, "%a %b %d, %I:%M %p %Z")),
+            tags$br(),
+            sprintf("🇷🇴 Romania: %s", format(romania_time, "%a %b %d, %H:%M %Z")),
+            tags$br(),
+            tags$small(
+              style = "color: #856404;",
+              "⚠️ Listing will NOT be visible until scheduled time"
+            )
+          )
+        })
+
         observeEvent(input[[paste0("send_to_ebay_", i)]], ignoreNULL = TRUE, ignoreInit = TRUE, {
           # Get form inputs
           title <- input[[paste0("item_title_", i)]]
@@ -1489,6 +1668,46 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
             input[[paste0("reserve_price_", i)]]
           } else {
             NULL
+          }
+
+          # Determine if scheduled or immediate
+          list_immediately <- input[[paste0("list_immediately_", i)]]
+          schedule_time_utc <- NULL
+
+          if (!isTRUE(list_immediately)) {
+            # User wants scheduled listing - build time from inputs
+            schedule_date <- input[[paste0("schedule_date_", i)]]
+            schedule_hour <- input[[paste0("schedule_hour_", i)]]
+            schedule_minute <- input[[paste0("schedule_minute_", i)]]
+
+            # Build Pacific time string
+            pacific_str <- sprintf(
+              "%s %s:%s:00",
+              schedule_date, schedule_hour, schedule_minute
+            )
+
+            # Parse as Pacific time
+            pacific_time <- as.POSIXct(
+              pacific_str,
+              tz = "America/Los_Angeles",
+              format = "%Y-%m-%d %H:%M:%S"
+            )
+
+            # Convert to UTC for API/database
+            schedule_time_utc <- as.POSIXct(format(pacific_time, tz = "UTC"), tz = "UTC")
+
+            # Validate schedule time
+            validation <- validate_schedule_time(schedule_time_utc)
+            if (!validation$valid) {
+              showNotification(validation$error, type = "error")
+              return()
+            }
+
+            cat("   📅 Scheduled listing:\n")
+            cat("      Pacific:", format(pacific_time, "%Y-%m-%d %H:%M %Z"), "\n")
+            cat("      UTC:", format(schedule_time_utc, "%Y-%m-%d %H:%M:%S"), "\n")
+          } else {
+            cat("   ⚡ Immediate listing (no schedule)\n")
           }
 
           # Validate inputs
@@ -1541,7 +1760,7 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
 
           # Show confirmation modal with auction details
           show_ebay_confirmation_modal(i, title, price, condition, "Stamps",
-                                       listing_type, duration, buy_it_now, reserve)
+                                       listing_type, duration, buy_it_now, reserve, schedule_time_utc)
         })
       })
     })
@@ -1612,6 +1831,22 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
             NULL
           }
 
+          # Rebuild schedule time (same logic as send_to_ebay observer)
+          list_immediately <- input[[paste0("list_immediately_", i)]]
+          schedule_time_utc <- NULL
+
+          if (!isTRUE(list_immediately)) {
+            schedule_date <- input[[paste0("schedule_date_", i)]]
+            schedule_hour <- input[[paste0("schedule_hour_", i)]]
+            schedule_minute <- input[[paste0("schedule_minute_", i)]]
+
+            pacific_str <- sprintf("%s %s:%s:00", schedule_date, schedule_hour, schedule_minute)
+            pacific_time <- as.POSIXct(pacific_str, tz = "America/Los_Angeles", format = "%Y-%m-%d %H:%M:%S")
+            schedule_time_utc <- as.POSIXct(format(pacific_time, tz = "UTC"), tz = "UTC")
+
+            cat("   📅 Confirmed scheduled listing:", format(schedule_time_utc, "%Y-%m-%d %H:%M:%S UTC"), "\n")
+          }
+
           # Check if eBay API is available
           api <- ebay_api()
 
@@ -1666,7 +1901,7 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
           # Call listing creation function with progress callback
           tryCatch({
             result <- create_ebay_listing_from_card(
-              stamp_id = paste0("CARD_", i, "_", format(Sys.time(), "%Y%m%d_%H%M%S")),
+              card_id = paste0("CARD_", i, "_", format(Sys.time(), "%Y%m%d_%H%M%S")),
               ai_data = ai_data,
               ebay_api = api,
               session_id = "manual_export",
@@ -1677,6 +1912,7 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
               listing_duration = duration,
               buy_it_now_price = buy_it_now,
               reserve_price = reserve,
+              schedule_time_utc = schedule_time_utc,
               progress_callback = function(msg, val) {
                 progress$set(message = msg, value = val)
               }
