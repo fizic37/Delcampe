@@ -142,6 +142,71 @@ initialize_ebay_tables <- function(db_path = "inst/app/data/tracking.sqlite") {
   })
 }
 
+#' Initialize eBay Listings Cache Table
+#'
+#' Creates table for storing ONLY eBay API data (not local drafts).
+#' This cache is separate from the ebay_listings table which tracks our local draft/submission process.
+#'
+#' @param db_path Path to SQLite database
+#'
+#' @return TRUE if successful, FALSE otherwise
+#' @export
+initialize_ebay_cache_table <- function(db_path = "inst/app/data/tracking.sqlite") {
+  tryCatch({
+    con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
+    on.exit(DBI::dbDisconnect(con))
+
+    # Create cache table
+    DBI::dbExecute(con, "
+      CREATE TABLE IF NOT EXISTS ebay_listings_cache (
+        cache_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ebay_item_id TEXT UNIQUE NOT NULL,
+        ebay_user_id TEXT NOT NULL,
+        title TEXT,
+        current_price REAL,
+        currency TEXT DEFAULT 'USD',
+        listing_status TEXT,
+        listing_type TEXT,
+        quantity INTEGER DEFAULT 1,
+        quantity_sold INTEGER DEFAULT 0,
+        watch_count INTEGER DEFAULT 0,
+        view_count INTEGER DEFAULT 0,
+        bid_count INTEGER DEFAULT 0,
+        start_time DATETIME,
+        end_time DATETIME,
+        time_remaining TEXT,
+        listing_url TEXT,
+        gallery_url TEXT,
+        sku TEXT,
+        category_id TEXT,
+        synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        api_call_name TEXT DEFAULT 'GetSellerList',
+        FOREIGN KEY (ebay_user_id) REFERENCES ebay_users(ebay_user_id)
+      )
+    ")
+
+    # Migration: Add category_id column if it doesn't exist
+    existing_columns <- DBI::dbListFields(con, "ebay_listings_cache")
+    if (!"category_id" %in% existing_columns) {
+      message("🔄 Migrating cache table: adding category_id column")
+      DBI::dbExecute(con, "ALTER TABLE ebay_listings_cache ADD COLUMN category_id TEXT")
+    }
+
+    # Create indexes for performance
+    DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_cache_item_id ON ebay_listings_cache(ebay_item_id)")
+    DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_cache_user_id ON ebay_listings_cache(ebay_user_id)")
+    DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_cache_status ON ebay_listings_cache(listing_status)")
+    DBI::dbExecute(con, "CREATE INDEX IF NOT EXISTS idx_cache_synced_at ON ebay_listings_cache(synced_at)")
+
+    message("\u2705 eBay listings cache table initialized")
+    return(TRUE)
+
+  }, error = function(e) {
+    message("\u274c Failed to initialize cache table: ", e$message)
+    return(FALSE)
+  })
+}
+
 #' Save eBay listing to database
 #' @param api_type API type used: "trading" or "inventory" (default: "inventory")
 #' @param listing_type Listing type: "auction" or "fixed_price" (default: "fixed_price")

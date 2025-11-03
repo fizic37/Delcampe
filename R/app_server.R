@@ -41,6 +41,13 @@ app_server <- function(input, output, session) {
       cat("⚠️ Failed to initialize eBay tables:", e$message, "\n")
     })
 
+    # Initialize eBay listings cache table (API-only data)
+    tryCatch({
+      initialize_ebay_cache_table("inst/app/data/tracking.sqlite")
+    }, error = function(e) {
+      cat("⚠️ Failed to initialize eBay cache table:", e$message, "\n")
+    })
+
     # Start session tracking
     tryCatch({
       start_processing_session(

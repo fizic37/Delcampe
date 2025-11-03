@@ -38,12 +38,25 @@
 - **ebay_scheduled_listing_ui_complete_20251102** - Scheduled listing UI
 
 #### eBay Listings Viewer & Sync
-- **ebay_listings_viewer_fixes_20251102** - LATEST: Category bugs, sync fixes, API errors
+- **ebay_listings_viewer_ui_fixes_20251103** - LATEST: UI optimization & category display fix
+  - Fixed: Removed vertical scrollbar (replaced bslib::card_body with tags$div)
+  - Fixed: Category display using SKU-based detection (stamps show correctly)
+  - UI: Compact single-row layout (stats + filters + countdown)
+  - Category: SKU prefix is authoritative (STAMP-/ST- → Stamps, PC- → Postcards)
+  - Files: mod_ebay_listings.R
+- **ebay_listings_api_sync_complete_20251103** - Pure API-driven viewer with cache
+  - NEW: Dedicated `ebay_listings_cache` table (separate from local drafts)
+  - NEW: `refresh_ebay_cache()` - Full cache refresh with rate limiting
+  - NEW: `get_cached_listings()` - Query with status filtering and priority ordering
+  - NEW: Countdown timer (15-min rate limit enforcement)
+  - NEW: Category field in cache table
+  - REFACTORED: mod_ebay_listings to show ONLY eBay API data
+  - Files: ebay_database_extension.R, ebay_sync_helpers.R, mod_ebay_listings.R, app_server.R
+- **ebay_listings_viewer_fixes_20251102** - Category bugs, sync fixes, API errors
   - Fixed: Stamps going to wrong category (262042 → 260)
   - Fixed: SKU prefix (PC- → STAMP-)
   - Fixed: Sync now inserts new listings from eBay
   - Fixed: XML parsing NULL/NA safety
-  - UNRESOLVED: eBay API GetSellerList call failing
   - Files: ebay_helpers.R, ebay_integration.R, mod_stamp_export.R, ebay_sync_helpers.R
 
 #### Image Upload & Other
@@ -119,21 +132,26 @@
 
 ## Recent Updates (Last 7 Days)
 
-1. **2025-11-02**: ebay_listings_viewer_fixes_20251102
+1. **2025-11-03**: ebay_listings_viewer_ui_fixes_20251103
+   - Removed vertical scrollbar from header (replaced bslib::card_body with tags$div)
+   - Fixed category display using SKU-based detection
+   - Stamps now show correctly even with old category IDs
+   - Compact professional layout: stats + filters + countdown in one row
+
+2. **2025-11-03**: ebay_listings_api_sync_complete_20251103
+   - Implemented pure API-driven viewer with dedicated cache table
+   - Added category_id field to cache table
+   - Fixed status mapping (sold vs ended based on quantity_sold)
+   - Enhanced XML parsing with namespace handling
+
+3. **2025-11-02**: ebay_listings_viewer_fixes_20251102
    - Fixed stamp category bug (262042 → 260)
-   - Fixed SKU prefix (PC- → STAMP-)  
+   - Fixed SKU prefix (PC- → STAMP-)
    - Enhanced sync to insert new eBay listings
    - Added XML parsing safety checks
-   - eBay API sync still failing - needs debugging
 
-2. **2025-11-01**: ebay_scheduled_listing_backend_complete_20251101
+4. **2025-11-01**: ebay_scheduled_listing_backend_complete_20251101
    - Scheduled listing backend with timezone handling
-
-3. **2025-11-01**: stamp_ai_extraction_complete_fix_20251101
-   - Fixed three critical stamp extraction bugs
-
-4. **2025-10-31**: stamp_ui_differentiation_purple_theme_20251031
-   - Purple theme for stamps tab
 
 ## How to Use This Index
 

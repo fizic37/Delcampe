@@ -11,42 +11,47 @@ mod_ebay_listings_ui <- function(id) {
   ns <- NS(id)
 
   tagList(
-    # Header card with stats and refresh - COMPACT VERSION
-    bslib::card(
-      bslib::card_header(
-        class = "d-flex justify-content-between align-items-center py-2",
-        tags$span("eBay Listings Viewer", style = "font-size: 1.1rem; font-weight: 500;"),
+    # Header with stats and filters - NO BSLIB CARD BODY
+    tags$div(
+      class = "bg-light border rounded mb-3 p-2",
+
+      # Title bar
+      tags$div(
+        class = "d-flex justify-content-between align-items-center mb-2",
+        tags$h5(class = "mb-0", "eBay Listings Viewer (API-Synced)"),
         actionButton(ns("refresh_all"), "Refresh from eBay",
                     class = "btn-primary btn-sm", icon = icon("refresh"))
       ),
-      bslib::card_body(
-        class = "py-2",
-        # Stats display - compact
-        uiOutput(ns("stats_display")),
 
-        # Filters row - compact spacing
-        fluidRow(
-          style = "margin-top: 8px;",
-          column(3,
-            selectInput(ns("filter_status"), "Status",
-                       choices = c("All", "Listed", "Active", "Scheduled", "Sold", "Ended",
-                                 "Completed", "Terminated", "Cancelled", "Draft", "Error"),
-                       selected = "All")
-          ),
-          column(3,
-            selectInput(ns("filter_type"), "Type",
-                       choices = c("All", "Postcard", "Stamp"),
-                       selected = "All")
-          ),
-          column(3,
-            selectInput(ns("filter_format"), "Format",
-                       choices = c("All", "Fixed Price", "Auction"),
-                       selected = "All")
-          ),
-          column(3,
-            textInput(ns("search_text"), "Search",
-                     placeholder = "Search title or SKU...")
-          )
+      # Single row: Stats + Filters + Countdown
+      tags$div(
+        class = "d-flex justify-content-between align-items-center gap-3",
+        style = "font-size: 13px;",
+
+        # Left: Stats with color labels
+        tags$div(
+          class = "d-flex align-items-center gap-3",
+          uiOutput(ns("stats_display"))
+        ),
+
+        # Center: Filters (no labels)
+        tags$div(
+          class = "d-flex align-items-center gap-2",
+          selectInput(ns("filter_status"), NULL,
+                     choices = c("All", "Active", "Sold", "Ended"),
+                     selected = "All",
+                     width = "100px"),
+          selectInput(ns("filter_format"), NULL,
+                     choices = c("All", "Fixed Price", "Auction"),
+                     selected = "All",
+                     width = "110px")
+        ),
+
+        # Right: Countdown
+        tags$div(
+          class = "text-end text-muted",
+          style = "font-size: 12px;",
+          uiOutput(ns("refresh_countdown"))
         )
       )
     ),
@@ -77,134 +82,168 @@ mod_ebay_listings_server <- function(id, ebay_api, session_id) {
       DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
     }
 
-    # Reactive: Load listings from database
-    listings_data <- reactiveVal(NULL)
-    last_refresh_time <- reactiveVal(NULL)
+    # Helper to decode category ID to broad category name
+    # IMPORTANT: Uses SKU prefix as authoritative source since old stamps
+    # were incorrectly exported to postcard category 262042
+    decode_category <- function(category_id, sku) {
+      if (is.na(category_id) || category_id == "") return("-")
 
-    # Load initial data
-    observe({
+      # Check SKU prefix first (authoritative for stamps vs postcards)
+      if (!is.na(sku) && nzchar(sku)) {
+        if (grepl("^(STAMP-|ST-)", sku, ignore.case = TRUE)) {
+          return("Stamps")
+        }
+        if (grepl("^PC-", sku, ignore.case = TRUE)) {
+          return("Postcards")
+        }
+      }
+
+      # Fallback to category ID if SKU doesn't help
+      category_num <- as.numeric(category_id)
+
+      # Postcards: 262042 (Topographical), 262043 (Non-Topographical)
+      if (category_num %in% c(262042, 262043)) {
+        return("Postcards")
+      }
+
+      # Stamps: 260 is parent, 675, 265, etc. are leaf categories
+      if (category_num == 260 || category_num %in% c(675, 265)) {
+        return("Stamps")
+      }
+
+      # Unknown category
+      return(paste0("Cat:", category_id))
+    }
+
+    # Reactive values for cache-based system
+    cached_listings <- reactiveVal(NULL)
+    last_sync_time <- reactiveVal(NULL)
+    is_syncing <- reactiveVal(FALSE)
+
+    # Get eBay user ID
+    ebay_user_id <- reactive({
       req(session_id())
-
       con <- get_db()
-      on.exit(DBI::dbDisconnect(con), add = TRUE)
-
-      data <- get_all_ebay_listings(con)
-      listings_data(data)
+      on.exit(DBI::dbDisconnect(con))
+      get_ebay_user_id_from_session(con, session_id())
     })
 
-    # Refresh all listings from eBay API
-    observeEvent(input$refresh_all, {
-      req(session_id(), ebay_api())
+    # Load cached data on init
+    observe({
+      req(ebay_user_id())
 
       con <- get_db()
-      on.exit(DBI::dbDisconnect(con), add = TRUE)
+      on.exit(DBI::dbDisconnect(con))
 
-      # Get eBay user ID
-      ebay_user_id <- get_ebay_user_id_from_session(con, session_id())
+      data <- get_cached_listings(con, ebay_user_id())
+      cached_listings(data)
 
-      if (is.null(ebay_user_id)) {
-        showNotification("Unable to determine eBay user ID", type = "error")
-        return()
+      # Get last sync time from log
+      last_sync <- DBI::dbGetQuery(con, "
+        SELECT MAX(sync_started_at) as last_sync
+        FROM ebay_sync_log
+        WHERE ebay_user_id = ? AND sync_status = 'completed'
+      ", list(ebay_user_id()))
+
+      if (!is.na(last_sync$last_sync[1])) {
+        last_sync_time(as.POSIXct(last_sync$last_sync[1]))
+      }
+    })
+
+    # Countdown timer output
+    output$refresh_countdown <- renderUI({
+      if (is.null(last_sync_time())) {
+        return(tags$span(class = "text-muted", icon("sync"), " Never synced"))
       }
 
-      # Check rate limit
-      if (!can_sync_listings(con, ebay_user_id, min_interval_minutes = 15)) {
-        showNotification(
-          "Please wait 15 minutes between full refreshes to avoid rate limits.",
-          type = "warning",
-          duration = 5
-        )
-        return()
+      # Update every 10 seconds
+      invalidateLater(10000)
+
+      time_since_sync <- difftime(Sys.time(), last_sync_time(), units = "mins")
+      time_remaining <- max(0, RATE_LIMIT_MINUTES - as.numeric(time_since_sync))
+
+      # Calculate "ago" text
+      mins_ago <- as.numeric(time_since_sync)
+      sync_text <- if (mins_ago < 1) {
+        "just now"
+      } else if (mins_ago < 60) {
+        paste(round(mins_ago), "min ago")
+      } else {
+        paste(round(mins_ago / 60, 1), "hrs ago")
       }
+
+      tagList(
+        tags$div(icon("sync"), " Last sync: ", sync_text),
+        if (time_remaining > 0) {
+          tags$div(
+            class = "text-warning",
+            icon("clock"),
+            sprintf(" Next refresh in %d min", ceiling(time_remaining))
+          )
+        } else {
+          tags$div(
+            class = "text-success",
+            icon("check"),
+            " Refresh available"
+          )
+        }
+      )
+    })
+
+    # Refresh all listings from eBay API (using new cache system)
+    observeEvent(input$refresh_all, {
+      req(ebay_user_id(), ebay_api())
+
+      con <- get_db()
+      on.exit(DBI::dbDisconnect(con))
 
       # Show progress
-      showNotification("Syncing listings from eBay...", id = "sync_progress", duration = NULL)
+      is_syncing(TRUE)
+      showNotification("Syncing from eBay API...", id = "sync_progress", duration = NULL)
 
-      # Start sync
-      sync_id <- log_sync_start(con, ebay_user_id)
+      # Call refresh function
+      result <- refresh_ebay_cache(con, ebay_api()$trading, ebay_user_id())
 
-      tryCatch({
-        # Get Trading API object
-        trading_api <- ebay_api()$trading
+      # Hide progress
+      is_syncing(FALSE)
+      removeNotification("sync_progress")
 
-        if (is.null(trading_api)) {
-          stop("Trading API not initialized")
-        }
-
-        # Fetch from eBay (last 90 days)
-        ebay_data <- fetch_seller_listings(
-          trading_api,
-          start_date = Sys.Date() - 90,
-          end_date = Sys.Date()
-        )
-
-        # Update cache
-        if (length(ebay_data$items) > 0) {
-          cat("📥 Syncing", length(ebay_data$items), "items from eBay\n")
-          update_listings_cache(con, ebay_data$items)
-
-          # Debug: Show first item details
-          if (length(ebay_data$items) > 0) {
-            first_item <- ebay_data$items[[1]]
-            cat("   First item: ID =", first_item$ItemID, "Title =", first_item$Title, "\n")
-          }
-        } else {
-          cat("⚠️  No items returned from eBay API\n")
-        }
-
-        # Log success
-        log_sync_complete(con, sync_id, length(ebay_data$items), api_calls = 1)
-
-        # Reload data
-        data <- get_all_ebay_listings(con)
-        cat("📊 Database now has", nrow(data), "total listings\n")
-        listings_data(data)
-        last_refresh_time(Sys.time())
-
-        # Remove progress notification
-        removeNotification("sync_progress")
+      if (result$success) {
+        # Reload cached data
+        data <- get_cached_listings(con, ebay_user_id())
+        cached_listings(data)
+        last_sync_time(Sys.time())
 
         showNotification(
-          sprintf("Successfully synced %d listings from eBay", length(ebay_data$items)),
+          sprintf("\u2705 Synced %d listings from eBay", result$items_synced),
           type = "message",
           duration = 3
         )
-
-      }, error = function(e) {
-        # Log error
-        log_sync_error(con, sync_id, e$message)
-
-        # Remove progress notification
-        removeNotification("sync_progress")
-
+      } else {
         showNotification(
-          paste("Error syncing:", e$message),
+          paste("Error:", result$error),
           type = "error",
           duration = 10
         )
-      })
+      }
     })
 
     # Filtered data based on user selections
     filtered_data <- reactive({
-      req(listings_data())
-      data <- listings_data()
+      req(cached_listings())
+      data <- cached_listings()
 
       if (nrow(data) == 0) return(data)
 
-      # Apply status filter
+      # Apply status filter (using listing_status from cache table)
       if (input$filter_status != "All") {
-        data <- data[data$status == tolower(input$filter_status), ]
+        data <- data[data$listing_status == tolower(input$filter_status), ]
       }
 
-      # Apply type filter
-      if (input$filter_type != "All") {
-        data <- data[data$item_type == input$filter_type, ]
-      }
-
-      # Apply format filter
+      # Apply format filter (using listing_type from cache table)
       if (input$filter_format != "All") {
-        format_value <- ifelse(input$filter_format == "Fixed Price", "fixed_price", "auction")
+        format_map <- c("Fixed Price" = "FixedPriceItem", "Auction" = "Chinese")
+        format_value <- format_map[input$filter_format]
         data <- data[data$listing_type == format_value, ]
       }
 
@@ -212,33 +251,33 @@ mod_ebay_listings_server <- function(id, ebay_api, session_id) {
       if (!is.null(input$search_text) && nzchar(input$search_text)) {
         search_pattern <- tolower(input$search_text)
         matches <- grepl(search_pattern, tolower(data$title)) |
-                  grepl(search_pattern, tolower(data$sku))
+                  grepl(search_pattern, tolower(data$sku), fixed = TRUE)
         data <- data[matches, ]
       }
 
       return(data)
     })
 
-    # Render stats display
+    # Render stats display (status-focused: Active/Sold priority)
     output$stats_display <- renderUI({
-      req(listings_data())
-      data <- listings_data()
+      req(cached_listings())
+      data <- cached_listings()
 
       if (nrow(data) == 0) {
         return(tags$div(
-          style = "font-size: 14px; color: #6c757d;",
-          "No listings found"
+          class = "alert alert-info py-2 mb-2",
+          "No cached data. Click 'Refresh from eBay' to load listings."
         ))
       }
 
       total <- nrow(data)
-      active <- sum(data$status == "listed", na.rm = TRUE)
-      sold <- sum(data$status == "sold", na.rm = TRUE)
-      scheduled <- sum(data$status == "scheduled", na.rm = TRUE)
+      active <- sum(data$listing_status == "active", na.rm = TRUE)
+      sold <- sum(data$listing_status == "sold", na.rm = TRUE)
+      ended <- sum(data$listing_status == "ended", na.rm = TRUE)
 
-      # Last refresh info
-      refresh_info <- if (!is.null(last_refresh_time())) {
-        time_ago <- as.numeric(difftime(Sys.time(), last_refresh_time(), units = "mins"))
+      # Last sync info
+      sync_info <- if (!is.null(last_sync_time())) {
+        time_ago <- as.numeric(difftime(Sys.time(), last_sync_time(), units = "mins"))
         if (time_ago < 1) {
           "just now"
         } else if (time_ago < 60) {
@@ -247,29 +286,19 @@ mod_ebay_listings_server <- function(id, ebay_api, session_id) {
           paste(round(time_ago / 60, 1), "hours ago")
         }
       } else {
-        "not synced yet"
+        "never"
       }
 
       tags$div(
-        style = "font-size: 14px; line-height: 1.2;",
-        fluidRow(
-          column(9,
-            tags$span(class = "me-3", icon("list"), strong(" Total:"), total),
-            tags$span(class = "me-3", icon("check-circle", class = "text-success"),
-                     strong(" Active:"), active),
-            tags$span(class = "me-3", icon("dollar-sign", class = "text-primary"),
-                     strong(" Sold:"), sold),
-            tags$span(icon("clock", class = "text-warning"),
-                     strong(" Scheduled:"), scheduled)
-          ),
-          column(3, class = "text-end text-muted",
-            tags$small(style = "font-size: 12px;", icon("sync"), " Last sync:", refresh_info)
-          )
-        )
+        style = "font-size: 13px;",
+        tags$span(class = "me-3", icon("list"), strong(" Total: "), total),
+        tags$span(class = "me-3", "\U0001F7E2", strong(" Active: "), tags$span(class = "text-success", active)),
+        tags$span(class = "me-3", "\U0001F535", strong(" Sold: "), tags$span(class = "text-primary", sold)),
+        tags$span(class = "me-3", "\u26AA", strong(" Ended: "), tags$span(class = "text-muted", ended))
       )
     })
 
-    # Render datatable
+    # Render datatable (using cache table structure)
     output$listings_table <- DT::renderDataTable({
       data <- filtered_data()
 
@@ -282,20 +311,20 @@ mod_ebay_listings_server <- function(id, ebay_api, session_id) {
         ))
       }
 
-      # Prepare display data
+      # Prepare display data (cache table columns)
       display_data <- data.frame(
-        Type = ifelse(data$item_type == "Postcard", "📮 Card", "📬 Stamp"),
+        Status = sapply(data$listing_status, render_status_badge),
         Title = substr(data$title, 1, 60),
-        Price = sprintf("$%.2f", data$price),
-        Status = sapply(data$status, render_status_badge),
-        Format = ifelse(data$listing_type == "fixed_price", "Fixed", "Auction"),
+        Category = mapply(decode_category, data$category_id, data$sku, SIMPLIFY = TRUE),
+        Price = sprintf("$%.2f", data$current_price),
+        Type = ifelse(data$listing_type == "Chinese", "Auction", "Fixed"),
         Views = ifelse(is.na(data$view_count), "-", as.character(data$view_count)),
         Watchers = ifelse(is.na(data$watch_count), "-", as.character(data$watch_count)),
         Bids = ifelse(is.na(data$bid_count) | data$bid_count == 0, "-", as.character(data$bid_count)),
         TimeLeft = ifelse(is.na(data$time_remaining), "-",
                          sapply(data$time_remaining, format_time_remaining)),
-        Listed = ifelse(is.na(data$listed_at), "-",
-                       format(as.Date(data$listed_at), "%b %d")),
+        SoldQty = ifelse(is.na(data$quantity_sold) | data$quantity_sold == 0, "-",
+                        as.character(data$quantity_sold)),
         stringsAsFactors = FALSE
       )
 
@@ -308,19 +337,19 @@ mod_ebay_listings_server <- function(id, ebay_api, session_id) {
         options = list(
           pageLength = 25,
           lengthMenu = c(10, 25, 50, 100),
-          order = list(list(9, "desc")),  # Sort by Listed date descending
+          order = list(list(0, "asc")),  # Sort by Status (Active first)
           dom = "Blfrtip",
           buttons = c("copy", "csv", "excel"),
           scrollX = TRUE,
           columnDefs = list(
-            list(width = "50px", targets = 0),   # Type
+            list(width = "100px", targets = 0),  # Status
             list(width = "300px", targets = 1),  # Title
-            list(width = "80px", targets = 2),   # Price
-            list(width = "100px", targets = 3),  # Status
-            list(width = "80px", targets = 4),   # Format
+            list(width = "80px", targets = 2),   # Category
+            list(width = "80px", targets = 3),   # Price
+            list(width = "80px", targets = 4),   # Type
             list(width = "60px", targets = 5:7), # Views, Watchers, Bids
             list(width = "80px", targets = 8),   # TimeLeft
-            list(width = "80px", targets = 9)    # Listed
+            list(width = "60px", targets = 9)    # SoldQty
           )
         ),
         extensions = "Buttons"
