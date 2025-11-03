@@ -11,8 +11,73 @@
 #' @importFrom bslib accordion accordion_panel
 mod_stamp_export_ui <- function(id) {
   ns <- NS(id)
-  
+
   tagList(
+    # Responsive CSS for stamp export UI
+    tags$style(HTML("
+      /* Compact listing controls row */
+      .stamp-listing-controls {
+        margin-bottom: 10px;
+      }
+
+      /* Ensure accordion content is readable on mobile */
+      .accordion-body {
+        padding: 15px;
+      }
+
+      /* Stack form columns on small screens */
+      @media (max-width: 768px) {
+        .stamp-listing-controls .col-sm-3,
+        .stamp-listing-controls .col-sm-4,
+        .stamp-listing-controls .col-sm-6 {
+          width: 100% !important;
+          margin-bottom: 10px;
+        }
+
+        /* Make accordion title text wrap on mobile */
+        .accordion-button {
+          white-space: normal;
+          text-align: left;
+        }
+
+        /* Stack Title, Year, Country on mobile */
+        .row:has(textarea[id*='item_title']) .col-sm-8,
+        .row:has(textarea[id*='item_title']) .col-sm-2 {
+          width: 100% !important;
+        }
+      }
+
+      /* Improve readability of help text boxes */
+      .stamp-export-help {
+        font-size: 0.9rem;
+        line-height: 1.5;
+      }
+
+      /* Ensure buttons are touch-friendly on mobile */
+      @media (max-width: 576px) {
+        .btn {
+          padding: 10px 16px;
+          font-size: 1rem;
+        }
+      }
+
+      /* Style the details/summary metadata collapsible */
+      details summary {
+        transition: all 0.2s ease;
+      }
+
+      details summary:hover {
+        background: #e9ecef;
+        border-radius: 4px;
+      }
+
+      details[open] summary {
+        margin-bottom: 10px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #dee2e6;
+      }
+    ")),
+
     # Accordion will be dynamically generated
     uiOutput(ns("accordion_container"))
   )
@@ -281,7 +346,7 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
           )
         ),
 
-        # Row 2: Title (8 cols) + Price (2 cols) + Condition (2 cols)
+        # Row 2: Title (8 cols) + Year (2 cols) + Country (2 cols)
         fluidRow(
           column(
             8,
@@ -295,31 +360,19 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
           ),
           column(
             2,
-            numericInput(
-              ns(paste0("starting_price_", idx)),
-              "Price (€) *",
-              value = 2.50,
-              min = 0.50,
-              step = 0.50,
+            textInput(
+              ns(paste0("year_", idx)),
+              "Year",
+              placeholder = "1920",
               width = "100%"
             )
           ),
           column(
             2,
-            selectInput(
-              ns(paste0("condition_", idx)),
-              "Condition *",
-              choices = c(
-                "Used" = "used",
-                "Mint" = "mint",
-                "Near Mint" = "near mint",
-                "Excellent" = "excellent",
-                "Very Good" = "very good",
-                "Good" = "good",
-                "Fair" = "fair",
-                "Poor" = "poor"
-              ),
-              selected = "used",
+            textInput(
+              ns(paste0("country_", idx)),
+              "Country",
+              placeholder = "Romania",
               width = "100%"
             )
           )
@@ -339,90 +392,127 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
           )
         ),
 
-        # Row 4: Listing Type (4 cols) + Auction Duration (4 cols) + Buy It Now (4 cols)
+        # Row 4: Compact Listing Controls (Listing Type + Duration + Price + spacer)
         fluidRow(
+          class = "stamp-listing-controls",
           column(
-            4,
+            3,
             selectInput(
               ns(paste0("listing_type_", idx)),
               "Listing Type *",
               choices = c(
-                "Auction" = "auction",
-                "Buy It Now (Fixed Price)" = "fixed_price"
+                "Fixed Price" = "fixed_price",
+                "Auction" = "auction"
               ),
-              selected = "auction",
+              selected = "fixed_price",
               width = "100%"
             )
           ),
-          # Auction Duration (conditional - shown only for auctions)
           column(
-            4,
-            conditionalPanel(
-              condition = sprintf("input['%s'] == 'auction'", ns(paste0("listing_type_", idx))),
-              selectInput(
-                ns(paste0("auction_duration_", idx)),
-                "Auction Duration *",
-                choices = c(
-                  "3 Days" = "Days_3",
-                  "5 Days" = "Days_5",
-                  "7 Days" = "Days_7",
-                  "10 Days" = "Days_10"
-                ),
-                selected = "Days_7",
-                width = "100%"
-              )
+            3,
+            selectInput(
+              ns(paste0("auction_duration_", idx)),
+              "Duration",
+              choices = c(
+                "Good 'Til Cancelled" = "GTC",
+                "3 Days" = "Days_3",
+                "5 Days" = "Days_5",
+                "7 Days" = "Days_7",
+                "10 Days" = "Days_10"
+              ),
+              selected = "GTC",
+              width = "100%"
             )
           ),
-          # Buy It Now Price (conditional - shown only for auctions)
+          column(
+            3,
+            numericInput(
+              ns(paste0("starting_price_", idx)),
+              "Starting Price ($)",
+              value = 1.00,
+              min = 0.01,
+              step = 0.50,
+              width = "100%"
+            )
+          ),
+          column(3, div(style = "height: 10px;"))  # Spacer for visual balance
+        ),
+        # Row 4b: Condition + Grade + Quality
+        fluidRow(
           column(
             4,
-            conditionalPanel(
-              condition = sprintf("input['%s'] == 'auction'", ns(paste0("listing_type_", idx))),
-              numericInput(
-                ns(paste0("buy_it_now_price_", idx)),
-                "Buy It Now (€) - Optional",
-                value = NA,
-                min = 0,
-                step = 0.50,
-                width = "100%"
-              )
+            selectInput(
+              ns(paste0("condition_", idx)),
+              "Condition *",
+              choices = c(
+                "Used" = "3000",
+                "New" = "1000",
+                "Like New" = "1500"
+              ),
+              selected = "3000",
+              width = "100%"
+            )
+          ),
+          column(
+            4,
+            selectInput(
+              ns(paste0("grade_", idx)),
+              "Grade",
+              choices = c(
+                "Used" = "Used",
+                "Ungraded" = "Ungraded",
+                "Fine (F)" = "Fine (F)",
+                "Very Fine (VF)" = "Very Fine (VF)",
+                "Extremely Fine (XF)" = "Extremely Fine (XF)",
+                "Superb" = "Superb",
+                "Mint" = "Mint"
+              ),
+              selected = "Used",
+              width = "100%"
+            )
+          ),
+          column(
+            4,
+            selectInput(
+              ns(paste0("quality_", idx)),
+              "Quality",
+              choices = c(
+                "Used" = "Used",
+                "Mint Hinged" = "Mint Hinged",
+                "Mint Never Hinged (MNH)" = "Mint Never Hinged",
+                "Mint No Gum" = "Mint No Gum",
+                "Mint Original Gum" = "Mint Original Gum"
+              ),
+              selected = "Used",
+              width = "100%"
             )
           )
         ),
-
-        # Row 5: Reserve Price (4 cols) + Year (4 cols) + Country (4 cols)
-        fluidRow(
-          # Reserve Price (conditional - shown only for auctions)
-          column(
-            4,
-            conditionalPanel(
-              condition = sprintf("input['%s'] == 'auction'", ns(paste0("listing_type_", idx))),
+        # Conditional panel for auction-specific fields
+        conditionalPanel(
+          condition = sprintf("input['%s'] == 'auction'", ns(paste0("listing_type_", idx))),
+          fluidRow(
+            column(
+              6,
               numericInput(
-                ns(paste0("reserve_price_", idx)),
-                "Reserve (€) - Optional",
+                ns(paste0("buy_it_now_price_", idx)),
+                "Buy It Now (optional)",
                 value = NA,
-                min = 0,
-                step = 0.50,
+                min = 0.01,
+                step = 1.00,
                 width = "100%"
               )
-            )
-          ),
-          column(
-            4,
-            textInput(
-              ns(paste0("year_", idx)),
-              "Year",
-              placeholder = "e.g., 1920",
-              width = "100%"
-            )
-          ),
-          column(
-            4,
-            textInput(
-              ns(paste0("country_", idx)),
-              "Country",
-              placeholder = "e.g., Romania",
-              width = "100%"
+            ),
+            column(
+              6,
+              numericInput(
+                ns(paste0("reserve_price_", idx)),
+                "Reserve Price (optional)",
+                value = NA,
+                min = 0.01,
+                step = 1.00,
+                width = "100%"
+              )
             )
           )
         ),
@@ -435,6 +525,9 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
           icon("exclamation-triangle", class = "text-warning"),
           tags$span(" Category is required for eBay listing. AI will auto-select based on detected country.", style = "color: #856404; margin-left: 8px;")
         ),
+
+        # Dynamic help text showing AI category selection
+        uiOutput(ns(paste0("category_help_text_", idx))),
 
         # Row 5b: Region (6 cols) + Country/Subcategory (6 cols)
         fluidRow(
@@ -478,6 +571,70 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
           column(
             12,
             uiOutput(ns(paste0("category_validation_", idx)))
+          )
+        ),
+
+        # Stamp Metadata Collapsible Section (using HTML details/summary)
+        tags$details(
+          style = "margin-top: 20px; margin-bottom: 20px; border: 1px solid #dee2e6; border-radius: 6px; padding: 10px; background: #f8f9fa;",
+          tags$summary(
+            style = "cursor: pointer; font-weight: 500; color: #495057; padding: 8px; user-select: none;",
+            icon("info-circle", style = "color: #17a2b8; margin-right: 8px;"),
+            "Optional Catalog Details (Denomination, Scott #, Perforation, Watermark)"
+          ),
+          tags$div(
+            style = "margin-top: 15px; padding: 10px; background: white; border-radius: 4px;",
+            # Denomination (full width)
+            fluidRow(
+              column(
+                12,
+                textInput(
+                  ns(paste0("denomination_", idx)),
+                  "Denomination",
+                  placeholder = "e.g., 5 LEI, 10c",
+                  width = "100%"
+                )
+              )
+            ),
+            # Scott Number (full width)
+            fluidRow(
+              column(
+                12,
+                textAreaInput(
+                  ns(paste0("scott_number_", idx)),
+                  "Scott Catalog Number",
+                  value = "",
+                  placeholder = "e.g., US-1234, RO-567",
+                  width = "100%",
+                  rows = 1
+                )
+              )
+            ),
+            # Perforation + Watermark row
+            fluidRow(
+              column(
+                6,
+                textAreaInput(
+                  ns(paste0("perforation_", idx)),
+                  "Perforation Type",
+                  value = "",
+                  placeholder = "e.g., Perf 12, Imperf, Rouletted",
+                  width = "100%",
+                  rows = 1
+                )
+              ),
+              column(
+                6,
+                textAreaInput(
+                  ns(paste0("watermark_", idx)),
+                  "Watermark",
+                  value = "",
+                  placeholder = "e.g., Crown, Star, None visible",
+                  width = "100%",
+                  rows = 1
+                )
+              )
+            )
           )
         ),
 
@@ -539,68 +696,6 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
             conditionalPanel(
               condition = sprintf("!input['%s']", ns(paste0("list_immediately_", idx))),
               uiOutput(ns(paste0("schedule_display_", idx)))
-            )
-          )
-        ),
-
-        # Stamp-Specific Metadata Section Header
-        tags$hr(style = "margin-top: 20px; margin-bottom: 10px;"),
-        tags$h5("Stamp Metadata (Optional)", style = "margin-bottom: 10px; color: #495057;"),
-
-        # Row 6: Denomination (4 cols) + Scott Number (4 cols) + Perforation (4 cols)
-        fluidRow(
-          column(
-            4,
-            textInput(
-              ns(paste0("denomination_", idx)),
-              "Denomination",
-              placeholder = "e.g., 5 LEI, 10c",
-              width = "100%"
-            )
-          ),
-          column(
-            12,
-            tags$div(
-              style = "border-left: 3px solid #9370DB; padding-left: 10px; margin-top: 10px;",
-              tags$label("Advanced Philatelic Details (Manual Entry Only)", style = "font-weight: bold; color: #9370DB;"),
-              tags$small("Scott Number, Perforation, Watermark - fill in if you know them", style = "color: #666; display: block; margin-bottom: 10px;")
-            )
-          )
-        ),
-        fluidRow(
-          column(
-            12,
-            textAreaInput(
-              ns(paste0("scott_number_", idx)),
-              "Scott Catalog Number",
-              value = "",
-              placeholder = "e.g., US-1234, RO-567",
-              width = "100%",
-              rows = 1
-            )
-          )
-        ),
-        fluidRow(
-          column(
-            6,
-            textAreaInput(
-              ns(paste0("perforation_", idx)),
-              "Perforation Type",
-              value = "",
-              placeholder = "e.g., Perf 12, Imperf, Rouletted",
-              width = "100%",
-              rows = 1
-            )
-          ),
-          column(
-            6,
-            textAreaInput(
-              ns(paste0("watermark_", idx)),
-              "Watermark",
-              value = "",
-              placeholder = "e.g., Crown, Star, None visible",
-              width = "100%",
-              rows = 1
             )
           )
         ),
@@ -1269,9 +1364,54 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
             tags$span(" Invalid category selection", style = "color: #721c24; margin-left: 8px;")
           )
         })
+
+        # Category help text - shows AI auto-selection info
+        output[[paste0("category_help_text_", i)]] <- renderUI({
+          # Get the country metadata value (AI-populated)
+          country_metadata <- input[[paste0("country_", i)]]
+          region <- input[[paste0("ebay_region_", i)]]
+          country_id <- input[[paste0("ebay_country_", i)]]
+
+          # Only show help text if:
+          # 1. Country metadata exists (AI detected it)
+          # 2. A region/country has been auto-selected
+          if (!is.null(country_metadata) && country_metadata != "" &&
+              !is.null(region) && region != "" &&
+              !is.null(country_id) && country_id != "") {
+
+            # Get region and country labels for display
+            region_data <- STAMP_CATEGORIES[[region]]
+            region_label <- if (!is.null(region_data$label)) region_data$label else region
+
+            country_label <- ""
+            if (region == "OT") {
+              country_label <- region_label  # "Other Stamps" is a leaf
+            } else if (!is.null(region_data$countries)) {
+              country_name <- names(region_data$countries)[region_data$countries == as.numeric(country_id)]
+              if (length(country_name) > 0) {
+                country_label <- country_name
+              }
+            }
+
+            return(
+              div(
+                style = "padding: 10px; background: #d1ecf1; border-left: 4px solid #17a2b8; border-radius: 4px; margin-bottom: 15px;",
+                icon("info-circle", style = "color: #0c5460;"),
+                tags$span(
+                  paste0(" AI detected country: ", country_metadata, " → Auto-selected: ", region_label,
+                         if (country_label != "" && country_label != region_label) paste0(" > ", country_label) else ""),
+                  style = "color: #0c5460; margin-left: 8px;"
+                )
+              )
+            )
+          }
+
+          # Return nothing if conditions not met
+          return(NULL)
+        })
       })
     })
-    
+
     # AI Extraction Handlers - Create observers for each image's Extract AI button
     observe({
       req(image_paths())
@@ -2078,6 +2218,10 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
           perforation <- input[[paste0("perforation_", i)]]
           watermark <- input[[paste0("watermark_", i)]]
 
+          # Get Grade and Quality with safe defaults
+          grade <- input[[paste0("grade_", i)]] %||% "Used"
+          quality <- input[[paste0("quality_", i)]] %||% "Used"
+
           # Get auction-specific inputs
           duration <- if (listing_type == "auction") {
             input[[paste0("auction_duration_", i)]] %||% "Days_7"
@@ -2170,6 +2314,8 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
             description = description,
             price = price,
             condition = condition,
+            grade = grade,
+            quality = quality,
             year = year,
             denomination = denomination,
             scott_number = scott_number,

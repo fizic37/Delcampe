@@ -74,9 +74,9 @@ extract_stamp_aspects <- function(ai_data, condition_code = NULL) {
     aspects[["Grade"]] <- list("Ungraded")
   }
 
-  # Quality (required by some stamp categories like India)
-  if (!is.null(ai_data$grade) && !is.na(ai_data$grade) && ai_data$grade != "") {
-    aspects[["Quality"]] <- list(ai_data$grade)
+  # Quality (required by some stamp categories like India) - NEW separate field
+  if (!is.null(ai_data$quality) && !is.na(ai_data$quality) && ai_data$quality != "") {
+    aspects[["Quality"]] <- list(ai_data$quality)
   } else {
     # Default to "Used" if not provided (most vintage stamps are used)
     aspects[["Quality"]] <- list("Used")
