@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<GetCategoriesResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Timestamp>2025-11-02T10:28:42.377Z</Timestamp><Ack>Failure</Ack><Errors><ShortMessage>Invalid IAF token.</ShortMessage><LongMessage>IAF token supplied is invalid.</LongMessage><ErrorCode>21916984</ErrorCode><SeverityCode>Error</SeverityCode><ErrorClassification>RequestError</ErrorClassification></Errors><Version>1421</Version><Build>E1421_CORE_APICATALOG_19146446_R1</Build></GetCategoriesResponse>

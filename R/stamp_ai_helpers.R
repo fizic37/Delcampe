@@ -67,8 +67,10 @@ build_stamp_prompt <- function(extraction_type = "individual", stamp_count = 1) 
       "IMPORTANT: These fields improve eBay search ranking - extract when visible!\n\n",
 
       "4. COUNTRY: Country of origin (e.g., United States, Romania, Germany)\n",
+      "   - ⚠️ CRITICAL FOR EBAY CATEGORIZATION - Try very hard to identify!\n",
       "   - Use English country name\n",
-      "   - If not visible, omit this field\n\n",
+      "   - Look for country indicators: text, currency, monarchs, national symbols\n",
+      "   - If not 100% certain, omit this field (do not guess)\n\n",
 
       "5. YEAR: Year of issue (e.g., 1957)\n",
       "   - Look carefully at printed year on stamp\n",
@@ -122,6 +124,10 @@ build_stamp_prompt <- function(extraction_type = "individual", stamp_count = 1) 
       "   - Format: numeric value only (e.g., 3.50)\n\n",
 
       "4. COUNTRY: Country of origin\n",
+      "   - ⚠️ CRITICAL FOR EBAY CATEGORIZATION - Try very hard to identify!\n",
+      "   - Use English country name\n",
+      "   - Look for country indicators: text, currency, monarchs, national symbols\n",
+      "   - If not 100% certain, omit this field (do not guess)\n",
       "5. YEAR: Year of issue\n",
       "6. DENOMINATION: Face value with currency\n\n",
 

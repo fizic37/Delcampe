@@ -274,40 +274,55 @@ infer_era_from_year <- function(year) {
   return(NULL)
 }
 
-#' Build Trading API Item Data from Card
+#' Build Trading API Item Data from Card or Stamp
 #'
-#' Converts postcard data + AI extraction to Trading API format
+#' Converts postcard/stamp data + AI extraction to Trading API format
 #'
-#' @param card_id Card ID
+#' @param card_id Card ID or Stamp ID
 #' @param ai_data AI extraction data (title, description, price, condition, etc.)
 #' @param image_url eBay Picture Services URL (already uploaded)
 #' @param country ISO country code (e.g., "RO" for Romania)
 #' @param location Text location (e.g., "Bucharest, Romania")
+#' @param category_id eBay category ID (default: 262042 for Topographical Postcards, use 260 for Stamps)
 #' @return List suitable for EbayTradingAPI$add_fixed_price_item()
 #' @export
-build_trading_item_data <- function(card_id, ai_data, image_url, country, location) {
+build_trading_item_data <- function(card_id, ai_data, image_url, country, location, category_id = 262042, is_stamp = FALSE) {
   # Truncate title to 80 chars (eBay limit)
   title <- substr(trimws(ai_data$title), 1, 80)
 
   # Map condition to Trading API ConditionID
-  condition_id <- map_condition_to_trading_id(ai_data$condition)
+  # Note: Many stamp categories don't accept condition IDs
+  condition_id <- if (is_stamp) {
+    NULL  # Stamps: no condition ID (causes Error 21917121)
+  } else {
+    map_condition_to_trading_id(ai_data$condition)
+  }
 
   # Extract aspects (convert to Trading API format)
   # Capitalize condition for display in aspects (e.g., "fair" -> "Fair")
   condition_display <- paste0(toupper(substr(ai_data$condition, 1, 1)), substr(ai_data$condition, 2, nchar(ai_data$condition)))
-  aspects <- extract_postcard_aspects(ai_data, condition_display)
+
+  # CRITICAL: Use correct aspect extraction based on item type
+  if (is_stamp) {
+    # STAMPS: Use stamp-specific aspects
+    aspects <- extract_stamp_aspects(ai_data, condition_display)
+  } else {
+    # POSTCARDS: Use postcard aspects
+    aspects <- extract_postcard_aspects(ai_data, condition_display)
+  }
 
   return(list(
     title = title,
     description = ai_data$description,
     country = country,
     location = location,
-    category_id = 262042,  # Topographical Postcards
+    category_id = category_id,
     price = format_ebay_price(ai_data$price),
-    condition_id = condition_id,
+    condition_id = condition_id,  # NULL for stamps, Trading ID for postcards
     quantity = 1,
     images = list(image_url),
-    aspects = aspects
+    aspects = aspects,
+    is_stamp = is_stamp  # Pass through for Trading API XML builder
   ))
 }
 

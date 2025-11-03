@@ -18,7 +18,11 @@ create_ebay_listing_from_card(
   listing_type = "fixed_price",
   listing_duration = "GTC",
   buy_it_now_price = NULL,
-  reserve_price = NULL
+  reserve_price = NULL,
+  schedule_time_utc = NULL,
+  is_stamp = FALSE,
+  category_id = NULL,
+  sku_prefix = "PC"
 )
 }
 \arguments{
@@ -46,6 +50,12 @@ Called at key stages with message (string) and value (0.0 to 1.0).}
 \item{buy_it_now_price}{Buy It Now price for auctions (optional)}
 
 \item{reserve_price}{Reserve price for auctions (optional)}
+
+\item{is_stamp}{Boolean indicating if this is a stamp or postcard (default: FALSE)}
+
+\item{category_id}{Numeric eBay category ID (required for stamps, optional for postcards)}
+
+\item{sku_prefix}{SKU prefix to use: "PC" for postcards, "STAMP" for stamps (default: "PC")}
 }
 \value{
 List with success status, listing_id, offer_id, sku, listing_url

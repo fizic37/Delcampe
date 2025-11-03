@@ -24,6 +24,7 @@ Used for cross-border listings where Inventory API fails to support Item.Country
 \item \href{#method-EbayTradingAPI-upload_image}{\code{EbayTradingAPI$upload_image()}}
 \item \href{#method-EbayTradingAPI-verify_add_item}{\code{EbayTradingAPI$verify_add_item()}}
 \item \href{#method-EbayTradingAPI-add_auction_item}{\code{EbayTradingAPI$add_auction_item()}}
+\item \href{#method-EbayTradingAPI-get_seller_list}{\code{EbayTradingAPI$get_seller_list()}}
 \item \href{#method-EbayTradingAPI-clone}{\code{EbayTradingAPI$clone()}}
 }
 }
@@ -124,6 +125,37 @@ Add auction listing (Chinese auction format)
 }
 \subsection{Returns}{
 List with success, item_id, error
+}
+}
+\if{html}{\out{<hr>}}
+\if{html}{\out{<a id="method-EbayTradingAPI-get_seller_list"></a>}}
+\if{latex}{\out{\hypertarget{method-EbayTradingAPI-get_seller_list}{}}}
+\subsection{Method \code{get_seller_list()}}{
+Get seller's active listings (GetSellerList)
+\subsection{Usage}{
+\if{html}{\out{<div class="r">}}\preformatted{EbayTradingAPI$get_seller_list(
+  start_date,
+  end_date,
+  page_number = 1,
+  include_watch_count = TRUE
+)}\if{html}{\out{</div>}}
+}
+
+\subsection{Arguments}{
+\if{html}{\out{<div class="arguments">}}
+\describe{
+\item{\code{start_date}}{POSIXct start date for listings}
+
+\item{\code{end_date}}{POSIXct end date for listings}
+
+\item{\code{page_number}}{Integer page number for pagination}
+
+\item{\code{include_watch_count}}{Boolean include watch count}
+}
+\if{html}{\out{</div>}}
+}
+\subsection{Returns}{
+httr2 response object with XML body
 }
 }
 \if{html}{\out{<hr>}}

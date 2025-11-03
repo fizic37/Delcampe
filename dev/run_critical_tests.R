@@ -46,6 +46,7 @@ cat("==============================================\n\n")
 # Define critical test files
 critical_tests <- c(
   "test-ebay_helpers.R",           # eBay functionality (core business logic)
+  "test-ebay_time_helpers.R",      # eBay time/scheduling utilities (NEW)
   "test-utils_helpers.R",          # Utility functions (used everywhere)
   "test-mod_delcampe_export.R",    # Delcampe export module (comprehensive)
   "test-mod_tracking_viewer.R"     # Tracking viewer module (comprehensive)

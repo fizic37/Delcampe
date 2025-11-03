@@ -18,6 +18,13 @@ app_ui <- function(request) {
       title = "Delcampe Image Processor",
       theme = bslib::bs_theme(version = 5, bootswatch = "flatly"),
 
+      # eBay Listings Viewer Tab - First position for easy access
+      bslib::nav_panel(
+        "eBay Listings",
+        icon = icon("list-alt"),
+        mod_ebay_listings_ui("ebay_listings")
+      ),
+
       # Postal Cards Tab - Main processing interface
       bslib::nav_panel(
         "Postal Cards",

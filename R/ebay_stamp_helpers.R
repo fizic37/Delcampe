@@ -66,9 +66,20 @@ extract_stamp_aspects <- function(ai_data, condition_code = NULL) {
     aspects[["Year of Issue"]] <- list(as.character(ai_data$year))
   }
 
-  # Grade (critical for stamps)
-  if (!is.null(ai_data$grade) && !is.na(ai_data$grade)) {
+  # Grade (critical for stamps) - REQUIRED by many categories
+  if (!is.null(ai_data$grade) && !is.na(ai_data$grade) && ai_data$grade != "") {
     aspects[["Grade"]] <- list(ai_data$grade)
+  } else {
+    # Default to "Ungraded" if not provided
+    aspects[["Grade"]] <- list("Ungraded")
+  }
+
+  # Quality (required by some stamp categories like India)
+  if (!is.null(ai_data$grade) && !is.na(ai_data$grade) && ai_data$grade != "") {
+    aspects[["Quality"]] <- list(ai_data$grade)
+  } else {
+    # Default to "Used" if not provided (most vintage stamps are used)
+    aspects[["Quality"]] <- list("Used")
   }
 
   # Certification (default to uncertified)

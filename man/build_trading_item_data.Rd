@@ -2,12 +2,20 @@
 % Please edit documentation in R/ebay_helpers.R
 \name{build_trading_item_data}
 \alias{build_trading_item_data}
-\title{Build Trading API Item Data from Card}
+\title{Build Trading API Item Data from Card or Stamp}
 \usage{
-build_trading_item_data(card_id, ai_data, image_url, country, location)
+build_trading_item_data(
+  card_id,
+  ai_data,
+  image_url,
+  country,
+  location,
+  category_id = 262042,
+  is_stamp = FALSE
+)
 }
 \arguments{
-\item{card_id}{Card ID}
+\item{card_id}{Card ID or Stamp ID}
 
 \item{ai_data}{AI extraction data (title, description, price, condition, etc.)}
 
@@ -16,10 +24,12 @@ build_trading_item_data(card_id, ai_data, image_url, country, location)
 \item{country}{ISO country code (e.g., "RO" for Romania)}
 
 \item{location}{Text location (e.g., "Bucharest, Romania")}
+
+\item{category_id}{eBay category ID (default: 262042 for Topographical Postcards, use 260 for Stamps)}
 }
 \value{
 List suitable for EbayTradingAPI$add_fixed_price_item()
 }
 \description{
-Converts postcard data + AI extraction to Trading API format
+Converts postcard/stamp data + AI extraction to Trading API format
 }

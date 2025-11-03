@@ -334,6 +334,34 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
           error = paste0("Exception: ", e$message)
         ))
       })
+    },
+
+    #' @description Get seller's active listings (GetSellerList)
+    #' @param start_date POSIXct start date for listings
+    #' @param end_date POSIXct end date for listings
+    #' @param page_number Integer page number for pagination
+    #' @param include_watch_count Boolean include watch count
+    #' @return httr2 response object with XML body
+    get_seller_list = function(start_date, end_date, page_number = 1, include_watch_count = TRUE) {
+      xml_body <- sprintf('<?xml version="1.0" encoding="utf-8"?>
+    <GetSellerListRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+      <DetailLevel>ReturnAll</DetailLevel>
+      <StartTimeFrom>%s</StartTimeFrom>
+      <StartTimeTo>%s</StartTimeTo>
+      <Pagination>
+        <EntriesPerPage>200</EntriesPerPage>
+        <PageNumber>%d</PageNumber>
+      </Pagination>
+      <IncludeWatchCount>%s</IncludeWatchCount>
+    </GetSellerListRequest>',
+      format(start_date, "%Y-%m-%dT%H:%M:%S.000Z"),
+      format(end_date, "%Y-%m-%dT%H:%M:%S.000Z"),
+      page_number,
+      tolower(as.character(include_watch_count))
+      )
+
+      response <- private$make_request(xml_body, "GetSellerList")
+      return(httr2::resp_body_string(response))
     }
   ),
 
@@ -366,6 +394,11 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
       # Add Item element
       item <- xml2::xml_add_child(doc, "Item")
 
+      # Add ScheduleTime if specified (MUST come early per eBay best practice)
+      if (!is.null(item_data$schedule_time)) {
+        xml2::xml_add_child(item, "ScheduleTime", item_data$schedule_time)
+      }
+
       # CRITICAL: Add Country (this is why we need Trading API!)
       xml2::xml_add_child(item, "Country", item_data$country)
       xml2::xml_add_child(item, "Location", item_data$location)
@@ -394,8 +427,10 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
       price_node <- xml2::xml_add_child(item, "StartPrice", as.character(item_data$price))
       xml2::xml_set_attr(price_node, "currencyID", "USD")
 
-      # Add condition
-      xml2::xml_add_child(item, "ConditionID", as.character(item_data$condition_id))
+      # Add condition (skip for stamps - many stamp categories don't accept ConditionID)
+      if (!is.null(item_data$condition_id) && !isTRUE(item_data$is_stamp)) {
+        xml2::xml_add_child(item, "ConditionID", as.character(item_data$condition_id))
+      }
 
       # Add quantity and duration
       xml2::xml_add_child(item, "Quantity", as.character(item_data$quantity))
@@ -536,6 +571,14 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
         # Success - extract ItemID
         item_id <- xml2::xml_text(xml2::xml_find_first(doc, ".//*[local-name()='ItemID']"))
 
+        # Extract StartTime (for scheduled listings)
+        start_time_node <- xml2::xml_find_first(doc, ".//*[local-name()='StartTime']")
+        start_time <- if (!is.na(start_time_node)) {
+          xml2::xml_text(start_time_node)
+        } else {
+          NULL
+        }
+
         warnings <- NULL
         if (ack == "Warning") {
           warning_nodes <- xml2::xml_find_all(doc, ".//*[local-name()='Errors']/*[local-name()='SeverityCode' and text()='Warning']/..")
@@ -547,6 +590,7 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
         return(list(
           success = TRUE,
           item_id = item_id,
+          start_time = start_time,
           warnings = warnings
         ))
       } else {
@@ -738,6 +782,11 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
       # Add Item element
       item <- xml2::xml_add_child(doc, "Item")
 
+      # Add ScheduleTime if specified (MUST come early per eBay best practice)
+      if (!is.null(item_data$schedule_time)) {
+        xml2::xml_add_child(item, "ScheduleTime", item_data$schedule_time)
+      }
+
       # CRITICAL: Add Country and Location
       xml2::xml_add_child(item, "Country", item_data$country)
       xml2::xml_add_child(item, "Location", item_data$location)
@@ -783,8 +832,10 @@ EbayTradingAPI <- R6::R6Class("EbayTradingAPI",
         xml2::xml_set_attr(reserve_node, "currencyID", "USD")
       }
 
-      # Add condition
-      xml2::xml_add_child(item, "ConditionID", as.character(item_data$condition_id))
+      # Add condition (skip for stamps - many stamp categories don't accept ConditionID)
+      if (!is.null(item_data$condition_id) && !isTRUE(item_data$is_stamp)) {
+        xml2::xml_add_child(item, "ConditionID", as.character(item_data$condition_id))
+      }
 
       # Add quantity (must be 1 for auctions)
       xml2::xml_add_child(item, "Quantity", "1")

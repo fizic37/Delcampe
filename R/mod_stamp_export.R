@@ -427,6 +427,60 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
           )
         ),
 
+        # eBay Category Selection Section
+        tags$hr(style = "margin-top: 20px; margin-bottom: 10px;"),
+        tags$h5("eBay Category *", style = "margin-bottom: 10px; color: #495057;"),
+        tags$div(
+          style = "background: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 4px;",
+          icon("exclamation-triangle", class = "text-warning"),
+          tags$span(" Category is required for eBay listing. AI will auto-select based on detected country.", style = "color: #856404; margin-left: 8px;")
+        ),
+
+        # Row 5b: Region (6 cols) + Country/Subcategory (6 cols)
+        fluidRow(
+          column(
+            6,
+            selectInput(
+              ns(paste0("ebay_region_", idx)),
+              "Region *",
+              choices = c(
+                "Select region..." = "",
+                "United States" = "US",
+                "Canada" = "CA",
+                "Great Britain" = "GB",
+                "Europe" = "EU",
+                "Asia" = "AS",
+                "Africa" = "AF",
+                "Latin America" = "LA",
+                "Caribbean" = "CB",
+                "Middle East" = "ME",
+                "Australia & Oceania" = "OC",
+                "British Colonies & Territories" = "BC",
+                "Topical Stamps" = "TP",
+                "Worldwide" = "WW",
+                "Specialty Philately" = "SP",
+                "Publications & Supplies" = "PS",
+                "Other Stamps" = "OT"
+              ),
+              selected = "",
+              width = "100%"
+            )
+          ),
+          column(
+            6,
+            # Country dropdown will be populated dynamically based on region selection
+            uiOutput(ns(paste0("ebay_country_ui_", idx)))
+          )
+        ),
+
+        # Category validation indicator
+        fluidRow(
+          column(
+            12,
+            uiOutput(ns(paste0("category_validation_", idx)))
+          )
+        ),
+
         # Row 6: Scheduling Controls
         tags$hr(style = "margin-top: 20px; margin-bottom: 10px;"),
         tags$h5("Listing Schedule", style = "margin-bottom: 10px; color: #495057;"),
@@ -970,6 +1024,21 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
                 if (!is.null(ai_data$ai_country) && !is.na(ai_data$ai_country) && ai_data$ai_country != "") {
                   updateTextInput(session, paste0("country_", i), value = ai_data$ai_country)
                   cat("   ✓ Country populated\n")
+
+                  # Auto-select eBay category based on country
+                  category_mapping <- map_country_to_category(ai_data$ai_country)
+                  if (!is.null(category_mapping$region_code) && category_mapping$region_code != "") {
+                    updateSelectInput(session, paste0("ebay_region_", i), selected = category_mapping$region_code)
+                    cat("   ✓ eBay Region auto-selected:", category_mapping$region_code, "\n")
+
+                    # If we have a specific country label, select it after a short delay (to allow region dropdown to populate)
+                    if (!is.null(category_mapping$country_label) && category_mapping$country_label != "" &&
+                        !is.null(category_mapping$category_id) && !is.na(category_mapping$category_id)) {
+                      Sys.sleep(0.2)  # Small delay for dropdown to populate
+                      updateSelectInput(session, paste0("ebay_country_", i), selected = as.character(category_mapping$category_id))
+                      cat("   ✓ eBay Country auto-selected:", category_mapping$country_label, "(", category_mapping$category_id, ")\n")
+                    }
+                  }
                 }
 
                 # Stamp-specific metadata fields
@@ -1058,6 +1127,146 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
             icon = button_icon,
             class = button_class,
             style = "width: 100%; margin-top: 10px;"
+          )
+        })
+
+        # Dynamic country dropdown based on selected region
+        output[[paste0("ebay_country_ui_", i)]] <- renderUI({
+          region <- input[[paste0("ebay_region_", i)]]
+
+          if (is.null(region) || region == "") {
+            return(
+              selectInput(
+                ns(paste0("ebay_country_", i)),
+                "Country/Subcategory *",
+                choices = c("Select region first..." = ""),
+                selected = "",
+                width = "100%"
+              )
+            )
+          }
+
+          # Get country choices from STAMP_CATEGORIES
+          if (!exists("STAMP_CATEGORIES")) {
+            return(
+              selectInput(
+                ns(paste0("ebay_country_", i)),
+                "Country/Subcategory *",
+                choices = c("Error: Category data not loaded" = ""),
+                selected = "",
+                width = "100%"
+              )
+            )
+          }
+
+          region_data <- STAMP_CATEGORIES[[region]]
+          if (is.null(region_data)) {
+            return(
+              selectInput(
+                ns(paste0("ebay_country_", i)),
+                "Country/Subcategory *",
+                choices = c("Error: Invalid region" = ""),
+                selected = "",
+                width = "100%"
+              )
+            )
+          }
+
+          # Special case: "Other Stamps" is a leaf category (no countries)
+          if (region == "OT" && !is.null(region_data$region_id)) {
+            return(
+              div(
+                style = "padding: 10px; background: #d1f2eb; border-left: 4px solid #20c997; border-radius: 4px;",
+                icon("check-circle", style = "color: #0c5e3e;"),
+                tags$span(
+                  paste0(" Category: ", region_data$label, " (", region_data$region_id, ")"),
+                  style = "color: #0c5e3e; margin-left: 8px; font-weight: 500;"
+                )
+              )
+            )
+          }
+
+          # Build country choices
+          countries <- region_data$countries
+          if (is.null(countries) || length(countries) == 0) {
+            return(
+              selectInput(
+                ns(paste0("ebay_country_", i)),
+                "Country/Subcategory *",
+                choices = c("No countries available" = ""),
+                selected = "",
+                width = "100%"
+              )
+            )
+          }
+
+          # Create choices with names as labels and values as category IDs
+          country_choices <- c("Select country..." = "", countries)
+
+          selectInput(
+            ns(paste0("ebay_country_", i)),
+            "Country/Subcategory *",
+            choices = country_choices,
+            selected = "",
+            width = "100%"
+          )
+        })
+
+        # Category validation indicator
+        output[[paste0("category_validation_", i)]] <- renderUI({
+          region <- input[[paste0("ebay_region_", i)]]
+          country_id <- input[[paste0("ebay_country_", i)]]
+
+          # No selection yet
+          if (is.null(region) || region == "" || is.null(country_id) || country_id == "") {
+            return(
+              div(
+                style = "padding: 10px; background: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px; margin-top: 10px;",
+                icon("exclamation-triangle", style = "color: #856404;"),
+                tags$span(" Please select region and country/subcategory to enable eBay sending", style = "color: #856404; margin-left: 8px;")
+              )
+            )
+          }
+
+          # Special case: "Other Stamps" region (OT) is a leaf
+          if (region == "OT") {
+            region_data <- STAMP_CATEGORIES[[region]]
+            if (!is.null(region_data$region_id)) {
+              return(
+                div(
+                  style = "padding: 10px; background: #d1f2eb; border-left: 4px solid #20c997; border-radius: 4px; margin-top: 10px;",
+                  icon("check-circle", style = "color: #0c5e3e;"),
+                  tags$span(
+                    paste0(" Valid leaf category: ", region_data$label, " (", region_data$region_id, ")"),
+                    style = "color: #0c5e3e; margin-left: 8px; font-weight: 500;"
+                  )
+                )
+              )
+            }
+          }
+
+          # Valid selection (region + country both selected)
+          region_data <- STAMP_CATEGORIES[[region]]
+          country_name <- names(region_data$countries)[region_data$countries == as.numeric(country_id)]
+
+          if (length(country_name) > 0) {
+            return(
+              div(
+                style = "padding: 10px; background: #d1f2eb; border-left: 4px solid #20c997; border-radius: 4px; margin-top: 10px;",
+                icon("check-circle", style = "color: #0c5e3e;"),
+                tags$span(
+                  paste0(" Valid leaf category: ", region_data$label, " > ", country_name, " (", country_id, ")"),
+                  style = "color: #0c5e3e; margin-left: 8px; font-weight: 500;"
+                )
+              )
+            )
+          }
+
+          # Invalid state
+          div(
+            style = "padding: 10px; background: #f8d7da; border-left: 4px solid #dc3545; border-radius: 4px; margin-top: 10px;",
+            icon("times-circle", style = "color: #721c24;"),
+            tags$span(" Invalid category selection", style = "color: #721c24; margin-left: 8px;")
           )
         })
       })
@@ -1279,6 +1488,21 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
                   if (!is.null(parsed$country) && !is.na(parsed$country) && parsed$country != "") {
                     updateTextInput(session, paste0("country_", i), value = parsed$country)
                     cat("      Country updated:", parsed$country, "\n")
+
+                    # Auto-select eBay category based on country
+                    category_mapping <- map_country_to_category(parsed$country)
+                    if (!is.null(category_mapping$region_code) && category_mapping$region_code != "") {
+                      updateSelectInput(session, paste0("ebay_region_", i), selected = category_mapping$region_code)
+                      cat("      ✓ eBay Region auto-selected:", category_mapping$region_code, "\n")
+
+                      # If we have a specific country label, select it after a short delay (to allow region dropdown to populate)
+                      if (!is.null(category_mapping$country_label) && category_mapping$country_label != "" &&
+                          !is.null(category_mapping$category_id) && !is.na(category_mapping$category_id)) {
+                        Sys.sleep(0.2)  # Small delay for dropdown to populate
+                        updateSelectInput(session, paste0("ebay_country_", i), selected = as.character(category_mapping$category_id))
+                        cat("      ✓ eBay Country auto-selected:", category_mapping$country_label, "(", category_mapping$category_id, ")\n")
+                      }
+                    }
                   }
 
                   # NOTE: Scott number, perforation, and watermark are NOT populated by AI
@@ -1758,8 +1982,52 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
             }
           }
 
-          # Show confirmation modal with auction details
-          show_ebay_confirmation_modal(i, title, price, condition, "Stamps",
+          # Validate eBay category selection
+          ebay_region <- input[[paste0("ebay_region_", i)]]
+          ebay_country_id <- input[[paste0("ebay_country_", i)]]
+
+          # Check if category is selected
+          if (is.null(ebay_region) || ebay_region == "") {
+            showNotification("Please select an eBay region category", type = "error")
+            return()
+          }
+
+          # Determine final category ID and label
+          category_id <- NULL
+          category_label <- "Unknown Category"
+
+          # Special case: "Other Stamps" is a leaf at region level
+          if (ebay_region == "OT") {
+            region_data <- STAMP_CATEGORIES[[ebay_region]]
+            if (!is.null(region_data$region_id)) {
+              category_id <- region_data$region_id
+              category_label <- region_data$label
+            }
+          } else {
+            # Normal case: need country selection
+            if (is.null(ebay_country_id) || ebay_country_id == "") {
+              showNotification("Please select an eBay country/subcategory", type = "error")
+              return()
+            }
+
+            category_id <- as.numeric(ebay_country_id)
+            region_data <- STAMP_CATEGORIES[[ebay_region]]
+            country_name <- names(region_data$countries)[region_data$countries == category_id]
+            if (length(country_name) > 0) {
+              category_label <- paste0(region_data$label, " > ", country_name)
+            }
+          }
+
+          # Final validation: must have a valid category ID
+          if (is.null(category_id) || is.na(category_id)) {
+            showNotification("Invalid category selection. Please select both region and country/subcategory.", type = "error")
+            return()
+          }
+
+          cat("   ✅ Category validated:", category_label, "(", category_id, ")\n")
+
+          # Show confirmation modal with auction details and selected category
+          show_ebay_confirmation_modal(i, title, price, condition, category_label,
                                        listing_type, duration, buy_it_now, reserve, schedule_time_utc)
         })
       })
@@ -1847,6 +2115,26 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
             cat("   📅 Confirmed scheduled listing:", format(schedule_time_utc, "%Y-%m-%d %H:%M:%S UTC"), "\n")
           }
 
+          # Get eBay category from user selection
+          ebay_region <- input[[paste0("ebay_region_", i)]]
+          ebay_country_id <- input[[paste0("ebay_country_", i)]]
+
+          # Determine category ID (same logic as validation)
+          category_id <- NULL
+          if (ebay_region == "OT") {
+            region_data <- STAMP_CATEGORIES[[ebay_region]]
+            category_id <- region_data$region_id
+          } else if (!is.null(ebay_country_id) && ebay_country_id != "") {
+            category_id <- as.numeric(ebay_country_id)
+          }
+
+          if (is.null(category_id) || is.na(category_id)) {
+            showNotification("Invalid category selection - cannot proceed", type = "error")
+            return()
+          }
+
+          cat("   📂 Using eBay category ID:", category_id, "\n")
+
           # Check if eBay API is available
           api <- ebay_api()
 
@@ -1901,7 +2189,7 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
           # Call listing creation function with progress callback
           tryCatch({
             result <- create_ebay_listing_from_card(
-              card_id = paste0("CARD_", i, "_", format(Sys.time(), "%Y%m%d_%H%M%S")),
+              card_id = paste0("STAMP_", i, "_", format(Sys.time(), "%Y%m%d_%H%M%S")),
               ai_data = ai_data,
               ebay_api = api,
               session_id = "manual_export",
@@ -1913,6 +2201,9 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
               buy_it_now_price = buy_it_now,
               reserve_price = reserve,
               schedule_time_utc = schedule_time_utc,
+              is_stamp = TRUE,  # Mark as stamp listing
+              category_id = category_id,  # Use selected stamp category
+              sku_prefix = "STAMP",  # Use STAMP- prefix for SKU
               progress_callback = function(msg, val) {
                 progress$set(message = msg, value = val)
               }

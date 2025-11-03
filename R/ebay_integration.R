@@ -20,13 +20,17 @@
 #' @param listing_duration Listing duration: "Days_3", "Days_5", "Days_7", "Days_10", or "GTC" (default: "GTC")
 #' @param buy_it_now_price Buy It Now price for auctions (optional)
 #' @param reserve_price Reserve price for auctions (optional)
+#' @param is_stamp Boolean indicating if this is a stamp or postcard (default: FALSE)
+#' @param category_id Numeric eBay category ID (required for stamps, optional for postcards)
+#' @param sku_prefix SKU prefix to use: "PC" for postcards, "STAMP" for stamps (default: "PC")
 #'
 #' @export
 create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id,
                                           image_url = NULL, ebay_user_id = NULL, ebay_username = NULL,
                                           progress_callback = NULL, listing_type = "fixed_price",
                                           listing_duration = "GTC", buy_it_now_price = NULL,
-                                          reserve_price = NULL) {
+                                          reserve_price = NULL, schedule_time_utc = NULL,
+                                          is_stamp = FALSE, category_id = NULL, sku_prefix = "PC") {
 
   cat("\n=== CREATING EBAY LISTING (Trading API) ===\n")
   cat("   Card ID:", card_id, "\n")
@@ -98,20 +102,55 @@ create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id
     cat("   \u26a0\ufe0f Could not detect country, using default: RO\n")
   }
 
+  # Validate schedule time if provided
+  if (!is.null(schedule_time_utc)) {
+    validation <- validate_schedule_time(schedule_time_utc)
+    if (!validation$valid) {
+      cat("   \u274c Schedule time validation failed:", validation$error, "\n")
+      return(list(
+        success = FALSE,
+        error = validation$error
+      ))
+    }
+  }
+
   # Step 4: Build Trading API item data
   cat("\n4. Building Trading API request...\n")
   if (!is.null(progress_callback)) progress_callback("Preparing listing data...", 0.7)
 
-  sku <- generate_sku(card_id)
+  # Generate SKU with correct prefix
+  sku <- generate_sku(card_id, prefix = sku_prefix)
   cat("   SKU:", sku, "\n")
+
+  # Determine category: stamps need user-selected category, postcards use 262042
+  if (is_stamp) {
+    # Category ID passed from UI (user-selected via dropdown)
+    # Validation already done in mod_stamp_export.R
+    # category_id parameter MUST be provided for stamps
+    if (is.null(category_id) || is.na(category_id)) {
+      stop("category_id is required for stamp listings")
+    }
+    cat("   Category:", category_id, "(from user selection)\n")
+  } else {
+    category_id <- 262042  # Topographical Postcards - LEAF category
+    cat("   Category: Topographical Postcards (262042)\n")
+  }
 
   item_data <- build_trading_item_data(
     card_id = card_id,
     ai_data = ai_data,
     image_url = image_url,
     country = country,
-    location = location_text
+    location = location_text,
+    category_id = category_id,
+    is_stamp = is_stamp
   )
+
+  # Add scheduling if requested
+  if (!is.null(schedule_time_utc)) {
+    item_data$schedule_time <- format_ebay_schedule_time(schedule_time_utc)
+    cat("   Scheduled for:", format_display_time(schedule_time_utc), "\n")
+  }
 
   # Add auction-specific fields if listing_type is auction
   if (listing_type == "auction") {
@@ -175,7 +214,12 @@ create_ebay_listing_from_card <- function(card_id, ai_data, ebay_api, session_id
     listing_type = listing_type,  # Auction or fixed_price
     listing_duration = listing_duration,  # Duration
     buy_it_now_price = buy_it_now_price,  # Buy It Now (optional)
-    reserve_price = reserve_price  # Reserve (optional)
+    reserve_price = reserve_price,  # Reserve (optional)
+    schedule_time = schedule_time_utc,  # Scheduled start time (optional)
+    is_scheduled = !is.null(schedule_time_utc),  # Boolean flag
+    actual_start_time = if (!is.null(result$start_time)) {  # eBay's returned StartTime
+      as.POSIXct(result$start_time, format = "%Y-%m-%dT%H:%M:%S", tz = "UTC")
+    } else NULL
   )
 
   if (!save_success) {

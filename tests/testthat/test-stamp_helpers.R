@@ -119,3 +119,36 @@ RECOMMENDED_PRICE: 2.00"
   expect_true(is.na(result$year))
   expect_true(is.na(result$scott_number))
 })
+
+# Category mapping tests
+test_that("map_country_to_category recognizes European countries", {
+  # Romania
+  result <- map_country_to_category("Romania")
+  expect_equal(result$region_code, "EU")
+  expect_equal(result$country_label, "Romania")
+  expect_equal(result$category_id, 47169)
+
+  # Romania with native spelling
+  result <- map_country_to_category("România")
+  expect_equal(result$region_code, "EU")
+  expect_equal(result$category_id, 47169)
+
+  # France
+  result <- map_country_to_category("France")
+  expect_equal(result$region_code, "EU")
+  expect_equal(result$category_id, 17734)
+})
+
+test_that("map_country_to_category handles US stamps (ambiguous)", {
+  result <- map_country_to_category("United States")
+  expect_equal(result$region_code, "US")
+  expect_null(result$country_label)  # Requires manual selection
+  expect_null(result$category_id)
+})
+
+test_that("map_country_to_category handles unknown countries", {
+  result <- map_country_to_category("Atlantis")
+  expect_null(result$region_code)
+  expect_null(result$country_label)
+  expect_null(result$category_id)
+})

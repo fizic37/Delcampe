@@ -19,7 +19,20 @@
       "mcp__serena__replace_symbol_body",
       "Read(//mnt/c/Users/mariu/Pictures/Screenshots/**)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "mcp__serena__delete_memory",
+      "WebFetch(domain:developer.ebay.com)",
+      "Bash(cp:*)",
+      "Bash(R:*)",
+      "WebFetch(domain:www.isoldwhat.com)",
+      "WebFetch(domain:www.ebay.com)",
+      "Bash(curl:*)",
+      "Bash(dev/stamp_categories_only.csv)",
+      "Bash(awk:*)",
+      "Bash(cat:*)",
+      "mcp__serena__initial_instructions",
+      "mcp__serena__check_onboarding_performed"
     ],
     "deny": [],
     "ask": []

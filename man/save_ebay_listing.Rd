@@ -23,7 +23,16 @@ save_ebay_listing(
   listing_type = "fixed_price",
   listing_duration = "GTC",
   buy_it_now_price = NULL,
-  reserve_price = NULL
+  reserve_price = NULL,
+  schedule_time = NULL,
+  is_scheduled = FALSE,
+  actual_start_time = NULL,
+  watch_count = 0,
+  view_count = 0,
+  bid_count = 0,
+  current_price = NULL,
+  time_remaining = NULL,
+  last_synced_at = NULL
 )
 }
 \arguments{
@@ -36,6 +45,24 @@ save_ebay_listing(
 \item{buy_it_now_price}{Buy It Now price for auctions (optional)}
 
 \item{reserve_price}{Reserve price for auctions (optional)}
+
+\item{schedule_time}{Scheduled start time as POSIXct or NULL for immediate (optional)}
+
+\item{is_scheduled}{Boolean flag indicating if listing is scheduled (default: FALSE)}
+
+\item{actual_start_time}{Actual start time returned by eBay as POSIXct or NULL (optional)}
+
+\item{watch_count}{Number of watchers (default: 0)}
+
+\item{view_count}{Number of views (default: 0)}
+
+\item{bid_count}{Number of bids (default: 0)}
+
+\item{current_price}{Current price from eBay (optional)}
+
+\item{time_remaining}{Time remaining in ISO 8601 format (optional)}
+
+\item{last_synced_at}{Last sync timestamp (optional)}
 }
 \description{
 Save eBay listing to database

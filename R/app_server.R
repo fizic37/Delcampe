@@ -332,6 +332,9 @@ app_server <- function(input, output, session) {
   ebay_api <- ebay_auth$api
   ebay_account_manager <- ebay_auth$account_manager
 
+  # eBay Listings Viewer server
+  mod_ebay_listings_server("ebay_listings", ebay_api = ebay_api, session_id = reactive(session$token))
+
   # ======================================================================
   # eBay STARTUP NOTIFICATION - Proactive Status Alert
   # ======================================================================
