@@ -342,20 +342,89 @@ mod_stamp_verso_processor_server <- function(id, stamp_type = "verso", on_grid_u
           py_h_temp <- if (!is.null(py_results$h_boundaries)) as.numeric(unlist(py_results$h_boundaries)) else numeric(0)
           py_v_temp <- if (!is.null(py_results$v_boundaries)) as.numeric(unlist(py_results$v_boundaries)) else numeric(0)
           
-          # Filter internal boundaries
-          py_detected_h_internal <- sort(unique(round(py_h_temp[py_h_temp > 1e-6 & py_h_temp < (rv$image_dims_original[2] - 1e-6)])))
-          py_detected_v_internal <- sort(unique(round(py_v_temp[py_v_temp > 1e-6 & py_v_temp < (rv$image_dims_original[1] - 1e-6)])))
-          
-          # Set defaults based on detection
-          default_rows <- if (length(py_detected_h_internal) > 0) length(py_detected_h_internal) + 1 else 1
-          default_cols <- if (length(py_detected_v_internal) > 0) length(py_detected_v_internal) + 1 else 1
-          
-          # Construct full boundary lists
-          rv$h_boundaries <- sort(unique(round(c(0, py_detected_h_internal, rv$image_dims_original[2]))))
-          rv$h_boundaries <- rv$h_boundaries[rv$h_boundaries >= 0 & rv$h_boundaries <= rv$image_dims_original[2]]
-          
-          rv$v_boundaries <- sort(unique(round(c(0, py_detected_v_internal, rv$image_dims_original[1]))))
-          rv$v_boundaries <- rv$v_boundaries[rv$v_boundaries >= 0 & rv$v_boundaries <= rv$image_dims_original[1]]
+          # Constants for boundary filtering
+          MIN_ROW_HEIGHT_PX <- 300      # Minimum 300px for a valid postal card row
+          MIN_ROW_HEIGHT_PERCENT <- 0.10  # Minimum 10% of image height
+
+          # Filter internal boundaries for minimum row height
+          message("   🔍 Filtering boundaries (min: ", MIN_ROW_HEIGHT_PX, "px or ",
+                  MIN_ROW_HEIGHT_PERCENT * 100, "%)")
+
+          image_height <- rv$image_dims_original[2]
+          image_width <- rv$image_dims_original[1]
+
+          # Filter horizontal boundaries
+          valid_h_internal <- c()
+          py_h_internal_raw <- sort(unique(round(py_h_temp[py_h_temp > 1e-6 & py_h_temp < (image_height - 1e-6)])))
+
+          if (length(py_h_internal_raw) > 0) {
+            prev_boundary <- 0
+            for (boundary in py_h_internal_raw) {
+              row_height <- boundary - prev_boundary
+              row_height_percent <- row_height / image_height
+
+              if (row_height >= MIN_ROW_HEIGHT_PX || row_height_percent >= MIN_ROW_HEIGHT_PERCENT) {
+                valid_h_internal <- c(valid_h_internal, boundary)
+                prev_boundary <- boundary
+                message("      ✅ Keeping H boundary at ", boundary, "px (row height: ",
+                        row_height, "px / ", sprintf("%.1f%%", row_height_percent * 100), ")")
+              } else {
+                message("      ⚠️  Filtering H boundary at ", boundary, "px (row height: ",
+                        row_height, "px / ", sprintf("%.1f%%", row_height_percent * 100),
+                        " - too small)")
+              }
+            }
+
+            # Check final row height
+            final_row_height <- image_height - prev_boundary
+            final_row_percent <- final_row_height / image_height
+            message("      ℹ️  Final row: ", final_row_height, "px / ",
+                    sprintf("%.1f%%", final_row_percent * 100))
+          }
+
+          # Apply same filtering to vertical boundaries
+          valid_v_internal <- c()
+          py_v_internal_raw <- sort(unique(round(py_v_temp[py_v_temp > 1e-6 & py_v_temp < (image_width - 1e-6)])))
+
+          if (length(py_v_internal_raw) > 0) {
+            prev_boundary <- 0
+            for (boundary in py_v_internal_raw) {
+              col_width <- boundary - prev_boundary
+              col_width_percent <- col_width / image_width
+
+              if (col_width >= MIN_ROW_HEIGHT_PX || col_width_percent >= MIN_ROW_HEIGHT_PERCENT) {
+                valid_v_internal <- c(valid_v_internal, boundary)
+                prev_boundary <- boundary
+                message("      ✅ Keeping V boundary at ", boundary, "px (col width: ",
+                        col_width, "px / ", sprintf("%.1f%%", col_width_percent * 100), ")")
+              } else {
+                message("      ⚠️  Filtering V boundary at ", boundary, "px (col width: ",
+                        col_width, "px / ", sprintf("%.1f%%", col_width_percent * 100),
+                        " - too small)")
+              }
+            }
+
+            # Check final column width
+            final_col_width <- image_width - prev_boundary
+            final_col_percent <- final_col_width / image_width
+            message("      ℹ️  Final column: ", final_col_width, "px / ",
+                    sprintf("%.1f%%", final_col_percent * 100))
+          }
+
+          # Set defaults based on filtered detection
+          default_rows <- if (length(valid_h_internal) > 0) length(valid_h_internal) + 1 else 1
+          default_cols <- if (length(valid_v_internal) > 0) length(valid_v_internal) + 1 else 1
+
+          # Construct full boundary lists with filtered boundaries
+          rv$h_boundaries <- sort(unique(round(c(0, valid_h_internal, image_height))))
+          rv$h_boundaries <- rv$h_boundaries[rv$h_boundaries >= 0 & rv$h_boundaries <= image_height]
+
+          rv$v_boundaries <- sort(unique(round(c(0, valid_v_internal, image_width))))
+          rv$v_boundaries <- rv$v_boundaries[rv$v_boundaries >= 0 & rv$v_boundaries <= image_width]
+
+          message("   📊 Final filtered boundaries:")
+          message("      H: ", paste(rv$h_boundaries, collapse = ", "))
+          message("      V: ", paste(rv$v_boundaries, collapse = ", "))
           
           # Fallback to evenly spaced if detection failed
           if (length(rv$h_boundaries) <= 2) {
@@ -609,12 +678,14 @@ mod_stamp_verso_processor_server <- function(id, stamp_type = "verso", on_grid_u
           rv$current_grid_rows <- existing$grid_rows
           rv$current_grid_cols <- existing$grid_cols
           
-          # Create web URLs for the copied crops
+          # Create web URLs for the copied crops with cache-busting
           abs_paths <- normalizePath(copy_result$new_paths, winslash = "/")
           abs_sess_dir <- normalizePath(session_temp_dir, winslash = "/")
           rel_paths <- sub(paste0("^", gsub("/", "\\/", abs_sess_dir), "/*"), "", abs_paths)
           rel_paths <- sub("^/*", "", rel_paths)
-          rv$extracted_paths_web <- paste(resource_prefix, rel_paths, sep = "/")
+          cache_buster <- format(Sys.time(), "%Y%m%d%H%M%OS")
+          base_urls <- paste(resource_prefix, rel_paths, sep = "/")
+          rv$extracted_paths_web <- paste0(base_urls, "?v=", cache_buster)
           
           # Track reuse in session activity
           track_stamp_activity(
@@ -685,17 +756,33 @@ mod_stamp_verso_processor_server <- function(id, stamp_type = "verso", on_grid_u
       req(input$hline_moved_direct)
       d <- input$hline_moved_direct
 
+      message("\n📏 H-LINE DRAG EVENT RECEIVED (stamp_verso)")
+      message("   Line ID: ", d$id)
+      message("   Position in rendered image: ", d$pos_px_wrapper, " px")
+      message("   Rendered image height: ", d$wrapper_dim, " px")
+
       if (!is.null(d$pos_px_wrapper) && !is.null(d$wrapper_dim) && !is.null(d$id)) {
         # Convert to original image coordinates
         scale_factor <- as.numeric(rv$image_dims_original[2]) / as.numeric(d$wrapper_dim)
         orig_y <- round(as.numeric(d$pos_px_wrapper) * scale_factor)
         line_index <- as.numeric(d$id)
 
+        message("   Original image height: ", rv$image_dims_original[2], " px")
+        message("   Scale factor: ", scale_factor)
+        message("   Calculated original Y: ", orig_y, " px")
+        message("   Before update: ", paste(rv$h_boundaries, collapse = ", "))
+
         if (line_index > 0 && line_index <= length(rv$h_boundaries)) {
           rv$h_boundaries[line_index] <- orig_y
           rv$boundaries_manually_adjusted <- TRUE
           rv$force_grid_redraw <- rv$force_grid_redraw + 1
+          message("   ✅ Updated rv$h_boundaries[", line_index, "] = ", orig_y)
+          message("   After update: ", paste(rv$h_boundaries, collapse = ", "))
+        } else {
+          message("   ❌ Line index ", line_index, " out of range (1 to ", length(rv$h_boundaries), ")")
         }
+      } else {
+        message("   ❌ Missing data - pos:", !is.null(d$pos_px_wrapper), " dim:", !is.null(d$wrapper_dim), " id:", !is.null(d$id))
       }
     })
 
@@ -703,17 +790,33 @@ mod_stamp_verso_processor_server <- function(id, stamp_type = "verso", on_grid_u
       req(input$vline_moved_direct)
       d <- input$vline_moved_direct
 
+      message("\n📏 V-LINE DRAG EVENT RECEIVED (stamp_verso)")
+      message("   Line ID: ", d$id)
+      message("   Position in rendered image: ", d$pos_px_wrapper, " px")
+      message("   Rendered image width: ", d$wrapper_dim, " px")
+
       if (!is.null(d$pos_px_wrapper) && !is.null(d$wrapper_dim) && !is.null(d$id)) {
         # Convert to original image coordinates
         scale_factor <- as.numeric(rv$image_dims_original[1]) / as.numeric(d$wrapper_dim)
         orig_x <- round(as.numeric(d$pos_px_wrapper) * scale_factor)
         line_index <- as.numeric(d$id)
 
+        message("   Original image width: ", rv$image_dims_original[1], " px")
+        message("   Scale factor: ", scale_factor)
+        message("   Calculated original X: ", orig_x, " px")
+        message("   Before update: ", paste(rv$v_boundaries, collapse = ", "))
+
         if (line_index > 0 && line_index <= length(rv$v_boundaries)) {
           rv$v_boundaries[line_index] <- orig_x
           rv$boundaries_manually_adjusted <- TRUE
           rv$force_grid_redraw <- rv$force_grid_redraw + 1
+          message("   ✅ Updated rv$v_boundaries[", line_index, "] = ", orig_x)
+          message("   After update: ", paste(rv$v_boundaries, collapse = ", "))
+        } else {
+          message("   ❌ Line index ", line_index, " out of range (1 to ", length(rv$v_boundaries), ")")
         }
+      } else {
+        message("   ❌ Missing data - pos:", !is.null(d$pos_px_wrapper), " dim:", !is.null(d$wrapper_dim), " id:", !is.null(d$id))
       }
     })
     
@@ -771,8 +874,7 @@ mod_stamp_verso_processor_server <- function(id, stamp_type = "verso", on_grid_u
           id = ns(paste0("hline_", i)),
           class = "draggable-line horizontal-line",
           `data-line-index` = i,
-          `data-boundary-value` = boundary_pos,  # Store original boundary value
-          style = sprintf("top: %.4f%%;", top_percent)
+          `data-boundary-value` = boundary_pos  # Store original boundary value; JavaScript will position
         )
       })
       
@@ -786,31 +888,34 @@ mod_stamp_verso_processor_server <- function(id, stamp_type = "verso", on_grid_u
           id = ns(paste0("vline_", i)),
           class = "draggable-line vertical-line",
           `data-line-index` = i,
-          `data-boundary-value` = boundary_pos,  # Store original boundary value
-          style = sprintf("left: %.4f%%;", left_percent)
+          `data-boundary-value` = boundary_pos  # Store original boundary value; JavaScript will position
         )
       })
       
-      # Cache-busting image source
-      img_src_with_nonce <- paste0("/", rv$image_url_display, "?v=", gsub("[^0-9]", "", as.character(as.numeric(Sys.time()) * 1000)))
-      
+      # Cache-busting image source (cache-buster already in rv$image_url_display)
+      img_src_with_nonce <- paste0("/", rv$image_url_display)
+
       tags$div(
-        style = "position:relative; width:100%; height:100%; overflow:visible;",
-        tags$img(
-          id = ns("preview_image"),
-          src = img_src_with_nonce,
-          style = "display:block; position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); max-width:100%; max-height:500px; width:auto; height:auto; object-fit:contain; pointer-events:none; z-index:5;",
-          `data-original-width` = rv$image_dims_original[1],
-          `data-original-height` = rv$image_dims_original[2],
-          onload = "console.log('✅ Image loaded successfully!');",
-          onerror = "console.error('❌ Image failed to load:', this.src);"
+        style = "position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; overflow:hidden;",
+        tags$div(
+          style = "position:relative; max-width:100%; max-height:100%;",
+          tags$img(
+            id = ns("preview_image"),
+            src = img_src_with_nonce,
+            style = "display:block; max-width:100%; max-height:500px; width:auto; height:auto; object-fit:contain; pointer-events:none;",
+            `data-original-width` = rv$image_dims_original[1],
+            `data-original-height` = rv$image_dims_original[2],
+            onload = "console.log('✅ Image loaded successfully!');",
+            onerror = "console.error('❌ Image failed to load:', this.src);"
+          ),
+          # Grid lines as direct children (not in wrapper div)
+          h_lines,
+          v_lines
         ),
-        h_lines, 
-        v_lines,
         # Re-initialize grid after each render
         tags$script(HTML(sprintf(
-          "if (typeof initDraggableGrid === 'function') { 
-             initDraggableGrid(document.getElementById('%s')); 
+          "if (typeof initDraggableGrid === 'function') {
+             initDraggableGrid(document.getElementById('%s'));
            }",
           session$ns("grid_ui_wrapper")
         )))
@@ -862,6 +967,12 @@ mod_stamp_verso_processor_server <- function(id, stamp_type = "verso", on_grid_u
       message("  📂 Persistent crop directory: ", py_out_dir)
       rv$extracted_paths_web <- NULL
 
+      message("\n🔪 EXTRACTION STARTING (stamp_verso)")
+      message("   Image: ", rv$image_path_original)
+      message("   H boundaries (original px): ", paste(rv$h_boundaries, collapse = ", "))
+      message("   V boundaries (original px): ", paste(rv$v_boundaries, collapse = ", "))
+      message("   Output dir: ", py_out_dir)
+
       py_results <- tryCatch({
         crop_image_with_boundaries(
           image_path = rv$image_path_original,
@@ -870,9 +981,14 @@ mod_stamp_verso_processor_server <- function(id, stamp_type = "verso", on_grid_u
           output_dir = py_out_dir
         )
       }, error = function(e) {
+        message("   ❌ Extraction failed: ", e$message)
         showNotification(paste("Extraction error:", e$message), type = "error", duration = 5)
         NULL
       })
+
+      if (!is.null(py_results)) {
+        message("   ✅ Extraction succeeded - ", length(unlist(py_results$extracted_paths)), " crops created")
+      }
 
       if (!is.null(py_results) && !is.null(py_results$extracted_paths) && length(unlist(py_results$extracted_paths)) > 0) {
         abs_paths <- normalizePath(unlist(py_results$extracted_paths), winslash = "/")
@@ -889,12 +1005,14 @@ mod_stamp_verso_processor_server <- function(id, stamp_type = "verso", on_grid_u
           web_paths[i] <- dest_file
         }
 
-        # Create web URLs from copied files
+        # Create web URLs from copied files with cache-busting
         abs_sess_dir <- normalizePath(session_temp_dir, winslash = "/")
         norm_web_paths <- normalizePath(web_paths, winslash = "/")
         rel_paths <- sub(paste0("^", gsub("/", "\\\\/", abs_sess_dir), "/*"), "", norm_web_paths)
         rel_paths <- sub("^/*", "", rel_paths)
-        rv$extracted_paths_web <- paste(resource_prefix, rel_paths, sep = "/")
+        cache_buster <- format(Sys.time(), "%Y%m%d%H%M%OS")
+        base_urls <- paste(resource_prefix, rel_paths, sep = "/")
+        rv$extracted_paths_web <- paste0(base_urls, "?v=", cache_buster)
 
         # Save processing with 3-layer architecture
         message("\n=== SAVING EXTRACTION (stamp_type: ", stamp_type, ") ===")

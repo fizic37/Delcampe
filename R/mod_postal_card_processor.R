@@ -315,20 +315,89 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           py_h_temp <- if (!is.null(py_results$h_boundaries)) as.numeric(unlist(py_results$h_boundaries)) else numeric(0)
           py_v_temp <- if (!is.null(py_results$v_boundaries)) as.numeric(unlist(py_results$v_boundaries)) else numeric(0)
           
-          # Filter internal boundaries
-          py_detected_h_internal <- sort(unique(round(py_h_temp[py_h_temp > 1e-6 & py_h_temp < (rv$image_dims_original[2] - 1e-6)])))
-          py_detected_v_internal <- sort(unique(round(py_v_temp[py_v_temp > 1e-6 & py_v_temp < (rv$image_dims_original[1] - 1e-6)])))
-          
-          # Set defaults based on detection
-          default_rows <- if (length(py_detected_h_internal) > 0) length(py_detected_h_internal) + 1 else 1
-          default_cols <- if (length(py_detected_v_internal) > 0) length(py_detected_v_internal) + 1 else 1
-          
-          # Construct full boundary lists
-          rv$h_boundaries <- sort(unique(round(c(0, py_detected_h_internal, rv$image_dims_original[2]))))
-          rv$h_boundaries <- rv$h_boundaries[rv$h_boundaries >= 0 & rv$h_boundaries <= rv$image_dims_original[2]]
-          
-          rv$v_boundaries <- sort(unique(round(c(0, py_detected_v_internal, rv$image_dims_original[1]))))
-          rv$v_boundaries <- rv$v_boundaries[rv$v_boundaries >= 0 & rv$v_boundaries <= rv$image_dims_original[1]]
+          # Constants for boundary filtering
+          MIN_ROW_HEIGHT_PX <- 300      # Minimum 300px for a valid postal card row
+          MIN_ROW_HEIGHT_PERCENT <- 0.10  # Minimum 10% of image height
+
+          # Filter internal boundaries for minimum row height
+          message("   🔍 Filtering boundaries (min: ", MIN_ROW_HEIGHT_PX, "px or ",
+                  MIN_ROW_HEIGHT_PERCENT * 100, "%)")
+
+          image_height <- rv$image_dims_original[2]
+          image_width <- rv$image_dims_original[1]
+
+          # Filter horizontal boundaries
+          valid_h_internal <- c()
+          py_h_internal_raw <- sort(unique(round(py_h_temp[py_h_temp > 1e-6 & py_h_temp < (image_height - 1e-6)])))
+
+          if (length(py_h_internal_raw) > 0) {
+            prev_boundary <- 0
+            for (boundary in py_h_internal_raw) {
+              row_height <- boundary - prev_boundary
+              row_height_percent <- row_height / image_height
+
+              if (row_height >= MIN_ROW_HEIGHT_PX || row_height_percent >= MIN_ROW_HEIGHT_PERCENT) {
+                valid_h_internal <- c(valid_h_internal, boundary)
+                prev_boundary <- boundary
+                message("      ✅ Keeping H boundary at ", boundary, "px (row height: ",
+                        row_height, "px / ", sprintf("%.1f%%", row_height_percent * 100), ")")
+              } else {
+                message("      ⚠️  Filtering H boundary at ", boundary, "px (row height: ",
+                        row_height, "px / ", sprintf("%.1f%%", row_height_percent * 100),
+                        " - too small)")
+              }
+            }
+
+            # Check final row height
+            final_row_height <- image_height - prev_boundary
+            final_row_percent <- final_row_height / image_height
+            message("      ℹ️  Final row: ", final_row_height, "px / ",
+                    sprintf("%.1f%%", final_row_percent * 100))
+          }
+
+          # Apply same filtering to vertical boundaries
+          valid_v_internal <- c()
+          py_v_internal_raw <- sort(unique(round(py_v_temp[py_v_temp > 1e-6 & py_v_temp < (image_width - 1e-6)])))
+
+          if (length(py_v_internal_raw) > 0) {
+            prev_boundary <- 0
+            for (boundary in py_v_internal_raw) {
+              col_width <- boundary - prev_boundary
+              col_width_percent <- col_width / image_width
+
+              if (col_width >= MIN_ROW_HEIGHT_PX || col_width_percent >= MIN_ROW_HEIGHT_PERCENT) {
+                valid_v_internal <- c(valid_v_internal, boundary)
+                prev_boundary <- boundary
+                message("      ✅ Keeping V boundary at ", boundary, "px (col width: ",
+                        col_width, "px / ", sprintf("%.1f%%", col_width_percent * 100), ")")
+              } else {
+                message("      ⚠️  Filtering V boundary at ", boundary, "px (col width: ",
+                        col_width, "px / ", sprintf("%.1f%%", col_width_percent * 100),
+                        " - too small)")
+              }
+            }
+
+            # Check final column width
+            final_col_width <- image_width - prev_boundary
+            final_col_percent <- final_col_width / image_width
+            message("      ℹ️  Final column: ", final_col_width, "px / ",
+                    sprintf("%.1f%%", final_col_percent * 100))
+          }
+
+          # Set defaults based on filtered detection
+          default_rows <- if (length(valid_h_internal) > 0) length(valid_h_internal) + 1 else 1
+          default_cols <- if (length(valid_v_internal) > 0) length(valid_v_internal) + 1 else 1
+
+          # Construct full boundary lists with filtered boundaries
+          rv$h_boundaries <- sort(unique(round(c(0, valid_h_internal, image_height))))
+          rv$h_boundaries <- rv$h_boundaries[rv$h_boundaries >= 0 & rv$h_boundaries <= image_height]
+
+          rv$v_boundaries <- sort(unique(round(c(0, valid_v_internal, image_width))))
+          rv$v_boundaries <- rv$v_boundaries[rv$v_boundaries >= 0 & rv$v_boundaries <= image_width]
+
+          message("   📊 Final filtered boundaries:")
+          message("      H: ", paste(rv$h_boundaries, collapse = ", "))
+          message("      V: ", paste(rv$v_boundaries, collapse = ", "))
           
           # Fallback to evenly spaced if detection failed
           if (length(rv$h_boundaries) <= 2) {
@@ -342,16 +411,24 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           rv$current_grid_rows <- max(0, length(rv$h_boundaries) - 1)
           rv$current_grid_cols <- max(0, length(rv$v_boundaries) - 1)
 
+          message("\n📊 GRID DETECTION COMPLETE")
+          message("   Image dimensions: ", rv$image_dims_original[1], " x ", rv$image_dims_original[2])
+          message("   Detected grid: ", rv$current_grid_rows, " x ", rv$current_grid_cols)
+          message("   H boundaries: ", paste(rv$h_boundaries, collapse = ", "))
+          message("   V boundaries: ", paste(rv$v_boundaries, collapse = ", "))
+
           # Update numeric inputs
           updateNumericInput(session, "num_rows_input", value = rv$current_grid_rows)
           updateNumericInput(session, "num_cols_input", value = rv$current_grid_cols)
 
+          rv$force_grid_redraw <- rv$force_grid_redraw + 1
+
           # === URL CREATION: ONLY after grid detection succeeds ===
           # CRITICAL FIX (2025-10-29): Delay URL creation until ALL data dependencies exist
-          # CRITICAL FIX (2025-11-01): Force grid redraw AFTER URL creation to prevent race condition
-          # Previous issue: force_grid_redraw++ triggered renderUI before rv$image_url_display was set
-          # This caused req() to fail silently, leaving UI with broken image icon
-          # New flow: Grid detection → set all data → create URL → set status → trigger redraw
+          # This prevents broken image icon that appeared when image_with_draggable_grid
+          # tried to render before rv$image_dims_original, rv$h_boundaries, and rv$v_boundaries were set.
+          # Previous issue: URL at line 274 → UI render → req() blocks → broken icon for 200-500ms
+          # New flow: Grid detection → set all data → create URL → UI renders complete image
 
           # Create web URL for display
           norm_session_dir <- normalizePath(session_temp_dir, winslash = "/")
@@ -364,10 +441,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           # Update status: ready to display
           rv$processing_status <- "ready"
 
-          # CRITICAL: Trigger UI redraw LAST to ensure all dependencies are set
-          rv$force_grid_redraw <- rv$force_grid_redraw + 1
-
-          message("  ✅ Image URL created, status = ready, grid redraw triggered")
+          message("  ✅ Image URL created, status = ready")
         } else {
           # Grid detection failed completely
           rv$processing_status <- "error"
@@ -423,6 +497,8 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           updateNumericInput(session, "num_rows_input", value = 1)
           updateNumericInput(session, "num_cols_input", value = 1)
 
+          rv$force_grid_redraw <- rv$force_grid_redraw + 1
+
           # Fallback succeeded, create URL and set ready
           norm_session_dir <- normalizePath(session_temp_dir, winslash = "/")
           norm_upload_path <- normalizePath(upload_path, winslash = "/")
@@ -433,10 +509,7 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
 
           rv$processing_status <- "ready"
 
-          # CRITICAL: Trigger UI redraw LAST to ensure all dependencies are set
-          rv$force_grid_redraw <- rv$force_grid_redraw + 1
-
-          message("  ✅ Fallback dimensions set, URL created, status = ready, grid redraw triggered")
+          message("  ✅ Fallback dimensions set, URL created, status = ready")
         } else {
           # Complete failure - no method worked
           rv$processing_status <- "error"
@@ -753,56 +826,89 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
       req(rv$image_url_display, rv$image_dims_original, length(rv$h_boundaries) >= 2, length(rv$v_boundaries) >= 2)
 
       force_redraw_trigger <- rv$force_grid_redraw  # Trigger reactivity
-      
+
+      message("\n🖼️ RENDERING IMAGE WITH GRID")
+      message("   Image URL: ", rv$image_url_display)
+      message("   Original dimensions (WxH): ", rv$image_dims_original[1], " x ", rv$image_dims_original[2])
+      message("   H boundaries: ", paste(rv$h_boundaries, collapse = ", "))
+      message("   V boundaries: ", paste(rv$v_boundaries, collapse = ", "))
+      message("   Force redraw trigger: ", force_redraw_trigger)
+
       h_boundaries_px <- rv$h_boundaries
       v_boundaries_px <- rv$v_boundaries
       
       # Create horizontal lines
+      message("   Creating horizontal lines:")
       h_lines <- lapply(seq_along(h_boundaries_px), function(i) {
         img_height <- as.numeric(rv$image_dims_original[2])
         boundary_pos <- as.numeric(h_boundaries_px[i])
         top_percent <- if (!is.na(img_height) && img_height > 0) (boundary_pos / img_height) * 100 else 0
-        
+
+        message("      H-line ", i, ": boundary=", boundary_pos, "px, top=", sprintf("%.2f", top_percent), "%")
+
         tags$div(
           id = ns(paste0("hline_", i)),
           class = "draggable-line horizontal-line",
           `data-line-index` = i,
-          `data-boundary-value` = boundary_pos,  # Store original boundary value
-          style = sprintf("top: %.4f%%;", top_percent)
+          `data-boundary-value` = boundary_pos  # Store original boundary value; JavaScript will position
         )
       })
       
       # Create vertical lines
+      message("   Creating vertical lines:")
       v_lines <- lapply(seq_along(v_boundaries_px), function(i) {
         img_width <- as.numeric(rv$image_dims_original[1])
         boundary_pos <- as.numeric(v_boundaries_px[i])
         left_percent <- if (!is.na(img_width) && img_width > 0) (boundary_pos / img_width) * 100 else 0
-        
+
+        message("      V-line ", i, ": boundary=", boundary_pos, "px, left=", sprintf("%.2f", left_percent), "%")
+
         tags$div(
           id = ns(paste0("vline_", i)),
           class = "draggable-line vertical-line",
           `data-line-index` = i,
-          `data-boundary-value` = boundary_pos,  # Store original boundary value
-          style = sprintf("left: %.4f%%;", left_percent)
+          `data-boundary-value` = boundary_pos  # Store original boundary value; JavaScript will position
         )
       })
       
-      # Cache-busting image source
-      img_src_with_nonce <- paste0("/", rv$image_url_display, "?v=", gsub("[^0-9]", "", as.character(as.numeric(Sys.time()) * 1000)))
+      # Cache-busting image source (already in rv$image_url_display, don't add another)
+      img_src_with_nonce <- paste0("/", rv$image_url_display)
+      message("   Final image src: ", img_src_with_nonce)
       
       tags$div(
-        style = "position:relative; width:100%; height:100%; overflow:visible;",
-        tags$img(
-          id = ns("preview_image"),
-          src = img_src_with_nonce,
-          style = "display:block; position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); max-width:100%; max-height:500px; width:auto; height:auto; object-fit:contain; pointer-events:none; z-index:5;",
-          `data-original-width` = rv$image_dims_original[1],
-          `data-original-height` = rv$image_dims_original[2],
-          onload = "console.log('✅ Image loaded successfully!');",
-          onerror = "console.error('❌ Image failed to load:', this.src);"
+        style = "position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; overflow:hidden;",
+        tags$div(
+          style = "position:relative; max-width:100%; max-height:100%;",
+          tags$img(
+            id = ns("preview_image"),
+            src = img_src_with_nonce,
+            style = "display:block; max-width:100%; max-height:500px; width:auto; height:auto; object-fit:contain; pointer-events:none;",
+            `data-original-width` = rv$image_dims_original[1],
+            `data-original-height` = rv$image_dims_original[2],
+            onload = sprintf(
+              "console.log('═══ IMAGE LOADED ═══');
+               var img = this;
+               var parent = img.parentElement;
+               var wrapper = parent.parentElement;
+               console.log('Natural size:', img.naturalWidth, 'x', img.naturalHeight);
+               console.log('Rendered size:', img.offsetWidth, 'x', img.offsetHeight);
+               console.log('Computed style:', window.getComputedStyle(img).width, 'x', window.getComputedStyle(img).height);
+               console.log('Parent size:', parent.offsetWidth, 'x', parent.offsetHeight);
+               console.log('Wrapper size:', wrapper.offsetWidth, 'x', wrapper.offsetHeight);
+               console.log('Position:', {
+                 top: img.offsetTop,
+                 left: img.offsetLeft,
+                 computedTop: window.getComputedStyle(img).top,
+                 computedLeft: window.getComputedStyle(img).left
+               });
+               console.log('═══════════════════');"
+            ),
+            onerror = "console.error('❌ Image failed to load:', this.src);"
+          ),
+          # Grid lines as direct children (not in wrapper div)
+          h_lines,
+          v_lines
         ),
-        h_lines, 
-        v_lines,
         # Re-initialize grid after each render
         tags$script(HTML(sprintf(
           "if (typeof initDraggableGrid === 'function') { 
@@ -885,12 +991,16 @@ mod_postal_card_processor_server <- function(id, card_type = "face", on_grid_upd
           web_paths[i] <- dest_file
         }
 
-        # Create web URLs from copied files
+        # Create web URLs from copied files with cache-busting
         abs_sess_dir <- normalizePath(session_temp_dir, winslash = "/")
         norm_web_paths <- normalizePath(web_paths, winslash = "/")
         rel_paths <- sub(paste0("^", gsub("/", "\\\\/", abs_sess_dir), "/*"), "", norm_web_paths)
         rel_paths <- sub("^/*", "", rel_paths)
-        rv$extracted_paths_web <- paste(resource_prefix, rel_paths, sep = "/")
+
+        # Add cache-busting timestamp to force browser to reload new crops
+        cache_buster <- format(Sys.time(), "%Y%m%d%H%M%OS")
+        base_urls <- paste(resource_prefix, rel_paths, sep = "/")
+        rv$extracted_paths_web <- paste0(base_urls, "?v=", cache_buster)
 
         # Save processing with 3-layer architecture
         message("\n=== SAVING EXTRACTION (card_type: ", card_type, ") ===")
