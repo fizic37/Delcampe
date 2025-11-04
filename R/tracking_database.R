@@ -43,7 +43,8 @@ get_db_path <- function() {
   return(db_path)
 }
 
-initialize_tracking_db <- function(db_path = get_db_path()) {
+initialize_tracking_db <- function(db_path = NULL) {
+  if (is.null(db_path)) db_path <- get_db_path()
   tryCatch({
     dir.create(dirname(db_path), recursive = TRUE, showWarnings = FALSE)
     con <- DBI::dbConnect(RSQLite::SQLite(), db_path)

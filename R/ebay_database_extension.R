@@ -3,7 +3,8 @@
 
 #' Initialize eBay listings table
 #' @export
-initialize_ebay_tables <- function(db_path = get_db_path()) {
+initialize_ebay_tables <- function(db_path = NULL) {
+  if (is.null(db_path)) db_path <- get_db_path()
   tryCatch({
     con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
     on.exit(DBI::dbDisconnect(con))
@@ -151,7 +152,8 @@ initialize_ebay_tables <- function(db_path = get_db_path()) {
 #'
 #' @return TRUE if successful, FALSE otherwise
 #' @export
-initialize_ebay_cache_table <- function(db_path = get_db_path()) {
+initialize_ebay_cache_table <- function(db_path = NULL) {
+  if (is.null(db_path)) db_path <- get_db_path()
   tryCatch({
     con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
     on.exit(DBI::dbDisconnect(con))
