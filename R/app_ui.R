@@ -9,153 +9,173 @@ app_ui <- function(request) {
   tagList(
     # Leave this function for adding external resources
     golem_add_external_resources(),
-    
+
     # Initialize shinyjs
     shinyjs::useShinyjs(),
-    
-    # Main application UI using Bootstrap navigation
-    bslib::page_navbar(
-      title = "Delcampe Image Processor",
-      theme = bslib::bs_theme(version = 5, bootswatch = "flatly"),
 
-      # eBay Listings Viewer Tab - First position for easy access
-      bslib::nav_panel(
-        "eBay Listings",
-        icon = icon("list-alt"),
-        mod_ebay_listings_ui("ebay_listings")
-      ),
+    # ==== LOGIN OVERLAY ====
+    # Login UI appears first, then is removed after successful authentication
+    mod_login_ui("login"),
 
-      # Postal Cards Tab - Main processing interface
-      bslib::nav_panel(
-        "Postal Cards",
-        icon = icon("images"),
-        
-        # FIXED: Combined image output display section MOVED TO TOP
-        fluidRow(
-          column(
-            width = 12,
-            # This is where the combined image output will be displayed
-            uiOutput("combined_image_output_display")
-          )
-        ),
+    # ==== MAIN APP UI (CONDITIONAL) ====
+    # Main app only shown after successful login (rendered in app_server.R)
+    uiOutput("main_app_ui")
+  )
+}
 
-        # Export section (shown after processing) - appears below Face/Verso
-        fluidRow(
-          style = "margin-top: 20px;",
-          column(
-            width = 12,
-            uiOutput("export_section_display")
-          )
-        ),
-        
-        # Face and Verso processing in two columns
-        fluidRow(
-          style = "margin-top: 20px;",
-          # Face Processing Section
-          column(
-            width = 6,
-            class = "face-column",
-            bslib::card(
-              header = bslib::card_header(
-                "Face Processing",
-                style = "background-color: #52B788; color: white;"
-              ),
-              class = "stamps-processing-card",
-              style = "min-height: 600px;",
-              mod_postal_card_processor_ui("face_processor", card_type = "face")
-            )
-          ),
-          
-          # Verso Processing Section  
-          column(
-            width = 6,
-            class = "verso-column",
-            bslib::card(
-              header = bslib::card_header(
-                "Verso Processing", 
-                style = "background-color: #40916C; color: white;"
-              ),
-              class = "stamps-processing-card",
-              style = "min-height: 600px;",
-              mod_postal_card_processor_ui("verso_processor", card_type = "verso")
-            )
-          )
+
+#' Generate Main Application Content
+#'
+#' @description
+#' Helper function that generates the main application UI (all tabs and content).
+#' This is called from app_server.R in a renderUI() to enable conditional display
+#' based on authentication status.
+#'
+#' @return bslib::page_navbar UI element
+#' @noRd
+main_app_content <- function() {
+  bslib::page_navbar(
+    title = "Delcampe Image Processor",
+    theme = bslib::bs_theme(version = 5, bootswatch = "flatly"),
+
+    # eBay Listings Viewer Tab - First position for easy access
+    bslib::nav_panel(
+      "eBay Listings",
+      icon = icon("list-alt"),
+      mod_ebay_listings_ui("ebay_listings")
+    ),
+
+    # Postal Cards Tab - Main processing interface
+    bslib::nav_panel(
+      "Postal Cards",
+      icon = icon("images"),
+
+      # FIXED: Combined image output display section MOVED TO TOP
+      fluidRow(
+        column(
+          width = 12,
+          # This is where the combined image output will be displayed
+          uiOutput("combined_image_output_display")
         )
       ),
 
-      # Stamps Tab - Full implementation
-      bslib::nav_panel(
-        title = "Stamps",
-        icon = icon("stamp"),
-        value = "stamps",
-
-        # Combined stamp output display section at top
-        fluidRow(
-          column(
-            width = 12,
-            uiOutput("stamp_combined_image_output_display")
-          )
-        ),
-
-        # Export section (shown after processing)
-        fluidRow(
-          style = "margin-top: 20px;",
-          column(
-            width = 12,
-            uiOutput("stamp_export_section_display")
-          )
-        ),
-
-        # Face and Verso processing in two columns
-        fluidRow(
-          style = "margin-top: 20px;",
-          # Stamp Face Processing Section
-          column(
-            width = 6,
-            class = "face-column",
-            bslib::card(
-              header = bslib::card_header(
-                "Stamp Face Processing",
-                style = "background-color: #9D4EDD; color: white;"
-              ),
-              class = "stamps-processing-card stamp-module-card",
-              style = "min-height: 600px;",
-              mod_stamp_face_processor_ui("stamp_face_processor", stamp_type = "face")
-            )
-          ),
-
-          # Stamp Verso Processing Section
-          column(
-            width = 6,
-            class = "verso-column",
-            bslib::card(
-              header = bslib::card_header(
-                "Stamp Verso Processing",
-                style = "background-color: #7B2CBF; color: white;"
-              ),
-              class = "stamps-processing-card stamp-module-card",
-              style = "min-height: 600px;",
-              mod_stamp_verso_processor_ui("stamp_verso_processor", stamp_type = "verso")
-            )
-          )
+      # Export section (shown after processing) - appears below Face/Verso
+      fluidRow(
+        style = "margin-top: 20px;",
+        column(
+          width = 12,
+          uiOutput("export_section_display")
         )
       ),
 
-      # Settings Tab (with eBay Connection back inside)
-      bslib::nav_panel(
-        "Settings",
-        icon = icon("cog"),
+      # Face and Verso processing in two columns
+      fluidRow(
+        style = "margin-top: 20px;",
+        # Face Processing Section
+        column(
+          width = 6,
+          class = "face-column",
+          bslib::card(
+            header = bslib::card_header(
+              "Face Processing",
+              style = "background-color: #52B788; color: white;"
+            ),
+            class = "stamps-processing-card",
+            style = "min-height: 600px;",
+            mod_postal_card_processor_ui("face_processor", card_type = "face")
+          )
+        ),
 
-        # Settings content with eBay as subtab
-        bslib::navset_card_tab(
-          bslib::nav_panel(
-            title = "General",
-            mod_settings_ui("settings")
-          ),
-          bslib::nav_panel(
-            title = "eBay Connection",
-            icon = icon("shopping-cart"),
-            mod_ebay_auth_ui("ebay_auth")
+        # Verso Processing Section
+        column(
+          width = 6,
+          class = "verso-column",
+          bslib::card(
+            header = bslib::card_header(
+              "Verso Processing",
+              style = "background-color: #40916C; color: white;"
+            ),
+            class = "stamps-processing-card",
+            style = "min-height: 600px;",
+            mod_postal_card_processor_ui("verso_processor", card_type = "verso")
+          )
+        )
+      )
+    ),
+
+    # Stamps Tab - Full implementation
+    bslib::nav_panel(
+      title = "Stamps",
+      icon = icon("stamp"),
+      value = "stamps",
+
+      # Combined stamp output display section at top
+      fluidRow(
+        column(
+          width = 12,
+          uiOutput("stamp_combined_image_output_display")
+        )
+      ),
+
+      # Export section (shown after processing)
+      fluidRow(
+        style = "margin-top: 20px;",
+        column(
+          width = 12,
+          uiOutput("stamp_export_section_display")
+        )
+      ),
+
+      # Face and Verso processing in two columns
+      fluidRow(
+        style = "margin-top: 20px;",
+        # Stamp Face Processing Section
+        column(
+          width = 6,
+          class = "face-column",
+          bslib::card(
+            header = bslib::card_header(
+              "Stamp Face Processing",
+              style = "background-color: #9D4EDD; color: white;"
+            ),
+            class = "stamps-processing-card stamp-module-card",
+            style = "min-height: 600px;",
+            mod_stamp_face_processor_ui("stamp_face_processor", stamp_type = "face")
+          )
+        ),
+
+        # Stamp Verso Processing Section
+        column(
+          width = 6,
+          class = "verso-column",
+          bslib::card(
+            header = bslib::card_header(
+              "Stamp Verso Processing",
+              style = "background-color: #7B2CBF; color: white;"
+            ),
+            class = "stamps-processing-card stamp-module-card",
+            style = "min-height: 600px;",
+            mod_stamp_verso_processor_ui("stamp_verso_processor", stamp_type = "verso")
+          )
+        )
+      )
+    ),
+
+    # Settings Tab (with eBay Connection back inside)
+    bslib::nav_panel(
+      "Settings",
+      icon = icon("cog"),
+
+      # Settings content with eBay as subtab
+      bslib::navset_card_tab(
+        bslib::nav_panel(
+          title = "General",
+          mod_settings_ui("settings")
+        ),
+        bslib::nav_panel(
+          title = "eBay Connection",
+          icon = icon("shopping-cart"),
+          mod_ebay_auth_ui("ebay_auth")
           )
         )
       ),
@@ -172,10 +192,20 @@ app_ui <- function(request) {
         bslib::nav_item(
           tags$a("Support", href = "#", class = "nav-link")
         )
+      ),
+
+      # ==== LOGOUT BUTTON ====
+      bslib::nav_item(
+        actionButton(
+          "logout",
+          "Logout",
+          icon = icon("sign-out-alt"),
+          class = "btn-outline-secondary"
+        )
       )
     )
-  )
 }
+
 
 #' Add external Resources to the Application
 #'

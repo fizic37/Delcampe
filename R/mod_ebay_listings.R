@@ -73,7 +73,7 @@ mod_ebay_listings_ui <- function(id) {
 #' @param session_id Reactive returning session ID
 #'
 #' @export
-mod_ebay_listings_server <- function(id, ebay_api, session_id) {
+mod_ebay_listings_server <- function(id, ebay_api, session_id, ebay_account_manager = NULL) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
 
@@ -120,12 +120,15 @@ mod_ebay_listings_server <- function(id, ebay_api, session_id) {
     last_sync_time <- reactiveVal(NULL)
     is_syncing <- reactiveVal(FALSE)
 
-    # Get eBay user ID
+    # Get eBay user ID from active account
     ebay_user_id <- reactive({
-      req(session_id())
-      con <- get_db()
-      on.exit(DBI::dbDisconnect(con))
-      get_ebay_user_id_from_session(con, session_id())
+      if (!is.null(ebay_account_manager)) {
+        active <- ebay_account_manager$get_active_account()
+        if (!is.null(active) && !is.null(active$user_id)) {
+          return(active$user_id)
+        }
+      }
+      return(NULL)
     })
 
     # Load cached data on init
@@ -192,7 +195,24 @@ mod_ebay_listings_server <- function(id, ebay_api, session_id) {
 
     # Refresh all listings from eBay API (using new cache system)
     observeEvent(input$refresh_all, {
-      req(ebay_user_id(), ebay_api())
+      cat("Refresh button clicked\n")
+
+      # Debug: Check what we have
+      user_id <- ebay_user_id()
+      api <- ebay_api()
+
+      cat("eBay User ID:", if (!is.null(user_id)) user_id else "NULL", "\n")
+      cat("eBay API:", if (!is.null(api)) "Present" else "NULL", "\n")
+
+      if (is.null(user_id)) {
+        showNotification("No eBay account selected", type = "warning", duration = 5)
+        return()
+      }
+
+      if (is.null(api) || is.null(api$trading)) {
+        showNotification("eBay API not initialized. Please check OAuth connection.", type = "error", duration = 5)
+        return()
+      }
 
       con <- get_db()
       on.exit(DBI::dbDisconnect(con))
@@ -202,7 +222,7 @@ mod_ebay_listings_server <- function(id, ebay_api, session_id) {
       showNotification("Syncing from eBay API...", id = "sync_progress", duration = NULL)
 
       # Call refresh function
-      result <- refresh_ebay_cache(con, ebay_api()$trading, ebay_user_id())
+      result <- refresh_ebay_cache(con, api$trading, user_id)
 
       # Hide progress
       is_syncing(FALSE)
@@ -254,6 +274,14 @@ mod_ebay_listings_server <- function(id, ebay_api, session_id) {
                   grepl(search_pattern, tolower(data$sku), fixed = TRUE)
         data <- data[matches, ]
       }
+
+      # Add sort priority: active=1, ended=2, completed=3, sold=4
+      data$sort_priority <- ifelse(data$listing_status == "active", 1,
+                              ifelse(data$listing_status == "ended", 2,
+                              ifelse(data$listing_status == "completed", 3, 4)))
+
+      # Sort by priority then by title
+      data <- data[order(data$sort_priority, data$title), ]
 
       return(data)
     })
@@ -337,7 +365,7 @@ mod_ebay_listings_server <- function(id, ebay_api, session_id) {
         options = list(
           pageLength = 25,
           lengthMenu = c(10, 25, 50, 100),
-          order = list(list(0, "asc")),  # Sort by Status (Active first)
+          ordering = FALSE,  # Disable client-side sorting (already sorted server-side)
           dom = "Blfrtip",
           buttons = c("copy", "csv", "excel"),
           scrollX = TRUE,

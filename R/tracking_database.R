@@ -396,9 +396,78 @@ initialize_tracking_db <- function(db_path = "inst/app/data/tracking.sqlite") {
       message("⚠️ Migration warning: ", e$message)
     })
 
+    # Migration: Upgrade users table for authentication system
+    tryCatch({
+      # Check if users table has password_hash column (new auth system)
+      columns <- DBI::dbGetQuery(con, "PRAGMA table_info(users)")
+
+      if (!"password_hash" %in% columns$name) {
+        message("🔄 Migrating users table to authentication system...")
+
+        # Step 1: Backup old users data (if any)
+        old_users_exist <- DBI::dbExistsTable(con, "users")
+        if (old_users_exist) {
+          old_users <- DBI::dbGetQuery(con, "SELECT * FROM users")
+          DBI::dbExecute(con, "DROP TABLE users")
+          message("✅ Backed up ", nrow(old_users), " legacy users")
+        }
+
+        # Step 2: Create new users table with authentication columns
+        DBI::dbExecute(con, "
+          CREATE TABLE users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('master', 'admin', 'user')),
+            is_master BOOLEAN NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            created_by TEXT,
+            last_login TEXT,
+            active BOOLEAN NOT NULL DEFAULT 1
+          )
+        ")
+
+        message("✅ Created new users table with authentication schema")
+
+        # Step 3: Seed two master users
+        # NOTE: Default passwords should be changed on first login in production!
+        master1_email <- "master1@delcampe.com"
+        master2_email <- "master2@delcampe.com"
+        master_password <- "DelcampeMaster2025!"  # Change this in production!
+
+        # Source the hash_password function from auth_system.R
+        # We need to hash passwords - using digest directly since auth_system may not be loaded yet
+        hash_password_init <- function(password) {
+          digest::digest(password, algo = "sha256", serialize = FALSE)
+        }
+
+        master_hash <- hash_password_init(master_password)
+        current_time <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+
+        DBI::dbExecute(con, "
+          INSERT INTO users (email, password_hash, role, is_master, created_at, active)
+          VALUES (?, ?, 'master', 1, ?, 1)
+        ", params = list(master1_email, master_hash, current_time))
+
+        DBI::dbExecute(con, "
+          INSERT INTO users (email, password_hash, role, is_master, created_at, active)
+          VALUES (?, ?, 'master', 1, ?, 1)
+        ", params = list(master2_email, master_hash, current_time))
+
+        message("✅ Seeded 2 master users: ", master1_email, ", ", master2_email)
+        message("⚠️  Default password: DelcampeMaster2025! (CHANGE IN PRODUCTION!)")
+      }
+    }, error = function(e) {
+      message("⚠️ Users table migration warning: ", e$message)
+    })
+
     # ========== INDEXES ==========
     
     indexes <- c(
+      # Users table indexes (authentication)
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)",
+      "CREATE INDEX IF NOT EXISTS idx_users_active ON users(active)",
+      "CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)",
       # Existing indexes (legacy)
       "CREATE INDEX IF NOT EXISTS idx_images_session ON images(session_id)",
       "CREATE INDEX IF NOT EXISTS idx_images_user ON images(user_id)",

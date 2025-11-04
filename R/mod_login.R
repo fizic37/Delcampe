@@ -117,23 +117,6 @@ mod_login_ui <- function(id){
             margin-top: 20px;
             font-weight: 500;
           }
-          
-          #", ns("login_container"), " .test-credentials {
-            margin-top: 30px;
-            padding: 20px;
-            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
-            border-radius: 15px;
-            text-align: center;
-            border-left: 5px solid #52B788;
-          }
-          
-          #", ns("login_container"), " .credential-code {
-            background: rgba(82, 183, 136, 0.1);
-            color: #40916C;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-weight: 600;
-          }
         ")))
       ),
       
@@ -161,11 +144,18 @@ mod_login_ui <- function(id){
             style = "position: relative; width: 100%;",
             icon("user", class = "input-icon"),
             textInput(
-              inputId = ns("userName"), 
+              inputId = ns("userName"),
               label = NULL,
-              placeholder = "Email address",
-              value = "marius.tita81@gmail.com"
-            )
+              placeholder = "Email address"
+            ),
+            # JavaScript to handle Enter key press
+            tags$script(HTML(sprintf("
+              $(document).on('keypress', '#%s', function(e) {
+                if(e.which == 13) {
+                  $('#%s').click();
+                }
+              });
+            ", ns("userName"), ns("login"))))
           )
         ),
         
@@ -182,11 +172,18 @@ mod_login_ui <- function(id){
             style = "position: relative; width: 100%;",
             icon("unlock-alt", class = "input-icon"),
             passwordInput(
-              inputId = ns("passwd"), 
+              inputId = ns("passwd"),
               label = NULL,
-              placeholder = "Password",
-              value = "admin123"
-            )
+              placeholder = "Password"
+            ),
+            # JavaScript to handle Enter key press
+            tags$script(HTML(sprintf("
+              $(document).on('keypress', '#%s', function(e) {
+                if(e.which == 13) {
+                  $('#%s').click();
+                }
+              });
+            ", ns("passwd"), ns("login"))))
           )
         ),
         
@@ -220,10 +217,7 @@ mod_login_ui <- function(id){
 mod_login_server <- function(id, vals){
   moduleServer(id, function(input, output, session){
     ns <- session$ns
-    
-    # Initialize users file if it doesn't exist
-    init_users_file()
-    
+
     # Authentication logic using auth_system functions
     observe({
       if (vals$login == FALSE) {
@@ -238,17 +232,43 @@ mod_login_server <- function(id, vals){
             if(auth_result$success) {
               # Authentication successful
               vals$login <- TRUE
-              
+
               # Remove login UI overlay
               removeUI(selector = paste0("#", ns("login_overlay")))
-              
+
               # Set user data from auth result
               vals$user_type <- auth_result$user$role
               vals$user_name <- auth_result$user$email
-              
+
               # Store additional user info for the session
               vals$user_data <- auth_result$user
-              
+
+              # Create session record in database for eBay integration
+              tryCatch({
+                con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+                on.exit(DBI::dbDisconnect(con), add = TRUE)
+
+                # Get user_id for this user (should be same as id after migration)
+                user_id <- DBI::dbGetQuery(con,
+                  "SELECT user_id FROM users WHERE id = ?",
+                  list(auth_result$user$id))$user_id[1]
+
+                if (is.na(user_id)) {
+                  # Fallback: use id as text if user_id not set
+                  user_id <- as.character(auth_result$user$id)
+                }
+
+                # This links the Shiny session to the database user
+                DBI::dbExecute(con, "
+                  INSERT OR REPLACE INTO sessions (session_id, user_id, status)
+                  VALUES (?, ?, 'active')
+                ", list(session$token, user_id))
+
+                cat("✅ Session created for user:", auth_result$user$email, "(user_id:", user_id, ")\n")
+              }, error = function(e) {
+                cat("⚠️ Warning: Could not create session record:", e$message, "\n")
+              })
+
             } else {
               # Authentication failed - show specific error message
               shinyjs::html("nomatch", paste(icon("exclamation-triangle", style = "margin-right: 8px;"), auth_result$message))

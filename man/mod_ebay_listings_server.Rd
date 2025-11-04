@@ -4,7 +4,7 @@
 \alias{mod_ebay_listings_server}
 \title{eBay Listings Viewer Server}
 \usage{
-mod_ebay_listings_server(id, ebay_api, session_id)
+mod_ebay_listings_server(id, ebay_api, session_id, ebay_account_manager = NULL)
 }
 \arguments{
 \item{id}{Module ID}

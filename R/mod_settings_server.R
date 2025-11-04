@@ -121,10 +121,16 @@ mod_settings_server <- function(id, current_user) {
     
     # Render different UI based on user role
     output$settings_content <- renderUI({
-      user_role <- current_user()$role
-      
-      if (user_role == "admin") {
-        # Admin users see full interface
+      # CRITICAL: Check if current_user exists and has role
+      user <- current_user()
+      if (is.null(user) || is.null(user$role)) {
+        return(div(class = "alert alert-warning", "Please log in to access settings."))
+      }
+
+      user_role <- user$role
+
+      if (user_role %in% c("master", "admin")) {
+        # Master and admin users see full interface
         render_admin_ui(ns)
       } else {
         # Regular users see only password change
@@ -132,9 +138,11 @@ mod_settings_server <- function(id, current_user) {
       }
     })
     
-    # Only call tracking viewer for admin users
+    # Only call tracking viewer for master and admin users
     observe({
-      if (current_user()$role == "admin") {
+      # CRITICAL: Check if current_user exists and has required fields
+      user <- current_user()
+      if (!is.null(user) && !is.null(user$role) && user$role %in% c("master", "admin")) {
         mod_tracking_viewer_server("tracking_viewer_1")
       }
     })
@@ -238,7 +246,9 @@ mod_settings_server <- function(id, current_user) {
     
     # Save LLM configuration - SIMPLIFIED VERSION
     observeEvent(input$save_llm_config, {
-      if (current_user()$role != "admin") return()
+      # CRITICAL: Check permissions
+      user <- current_user()
+      if (is.null(user) || is.null(user$role) || !user$role %in% c("master", "admin")) return()
       
       cat("Save LLM config button clicked\n")
       
@@ -342,7 +352,8 @@ mod_settings_server <- function(id, current_user) {
     
     # Test Claude connection
     observeEvent(input$test_claude, {
-      if (current_user()$role != "admin") return()
+      user <- current_user()
+      if (is.null(user) || is.null(user$role) || !user$role %in% c("master", "admin")) return()
       
       if (!llm_config$claude_configured) {
         alerts$llm_message <- "Claude API key not configured"
@@ -357,7 +368,8 @@ mod_settings_server <- function(id, current_user) {
     
     # Test OpenAI connection
     observeEvent(input$test_openai, {
-      if (current_user()$role != "admin") return()
+      user <- current_user()
+      if (is.null(user) || is.null(user$role) || !user$role %in% c("master", "admin")) return()
       
       if (!llm_config$openai_configured) {
         alerts$llm_message <- "OpenAI API key not configured"
@@ -412,25 +424,54 @@ mod_settings_server <- function(id, current_user) {
     # Handle password change submission
     observeEvent(input$submit_password_change, {
       req(input$current_password, input$new_password, input$confirm_new_password)
-      
+
+      # Get current user
+      user <- current_user()
+      if (is.null(user) || is.null(user$email)) {
+        alerts$user_message <- "User session not found"
+        alerts$user_type <- "danger"
+        return()
+      }
+
       # Validate password confirmation
       if (input$new_password != input$confirm_new_password) {
         alerts$user_message <- "New passwords do not match"
         alerts$user_type <- "danger"
         return()
       }
-      
-      # Mock authentication for now
-      alerts$user_message <- "Password change functionality not yet implemented"
-      alerts$user_type <- "info"
-      removeModal()
+
+      # Verify current password
+      auth_result <- authenticate_user(user$email, input$current_password)
+      if (!auth_result$success) {
+        alerts$user_message <- "Current password is incorrect"
+        alerts$user_type <- "danger"
+        return()
+      }
+
+      # Update password
+      update_result <- update_user_password(
+        email = user$email,
+        new_password = input$new_password,
+        current_user_email = user$email,
+        current_user_role = user$role
+      )
+
+      if (update_result$success) {
+        alerts$user_message <- "Password updated successfully"
+        alerts$user_type <- "success"
+        removeModal()
+      } else {
+        alerts$user_message <- paste("Error:", update_result$message)
+        alerts$user_type <- "danger"
+      }
     })
     
     # ==== ALERT RENDERING ====
     
     # Render LLM alerts
     output$llm_alerts <- renderUI({
-      if (current_user()$role != "admin") return(NULL)
+      user <- current_user()
+      if (is.null(user) || is.null(user$role) || !user$role %in% c("master", "admin")) return(NULL)
       
       if (alerts$llm_message != "") {
         div(

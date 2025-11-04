@@ -478,9 +478,9 @@ refresh_ebay_cache <- function(con, ebay_api, ebay_user_id, days_back = 90) {
         ensure_single(item$PrimaryCategory)
       )
 
-      # Insert into cache
+      # Insert into cache (OR REPLACE to handle duplicates)
       DBI::dbExecute(con, "
-        INSERT INTO ebay_listings_cache (
+        INSERT OR REPLACE INTO ebay_listings_cache (
           ebay_item_id, ebay_user_id, title, current_price, currency,
           listing_status, listing_type, quantity, quantity_sold,
           watch_count, view_count, bid_count, start_time, end_time,

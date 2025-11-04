@@ -171,6 +171,46 @@ app_server <- function(input, output, session) {
     verso_used_existing = FALSE
   )
 
+  # ==== AUTHENTICATION STATE ====
+  # Initialize authentication reactive values
+  vals <- reactiveValues(
+    login = FALSE,           # Boolean: user logged in?
+    user_type = NULL,        # String: "master", "admin", or "user"
+    user_name = NULL,        # String: user email
+    user_data = NULL         # List: complete user record
+  )
+
+  # ==== LOGIN MODULE ====
+  # MUST be called before other modules - updates vals on successful authentication
+  mod_login_server("login", vals)
+
+  # ==== CONDITIONAL UI RENDERING ====
+  # Main app only shown after successful login
+  output$main_app_ui <- renderUI({
+    # CRITICAL: req() stops execution if login is FALSE
+    req(vals$login)
+
+    # Load main application UI from app_ui.R helper
+    main_app_content()
+  })
+
+  # ==== LOGOUT HANDLER ====
+  observeEvent(input$logout, {
+    # Log the logout event
+    if (!is.null(vals$user_name)) {
+      message("✅ User logged out: ", vals$user_name)
+    }
+
+    # Reset session state
+    vals$login <- FALSE
+    vals$user_type <- NULL
+    vals$user_name <- NULL
+    vals$user_data <- NULL
+
+    # Reload app to show login screen
+    session$reload()
+  })
+
   # Session directory for combined images - CREATE ONCE, not reactive!
   session_temp_dir_path <- tempfile("shiny_combined_images_")
   dir.create(session_temp_dir_path, showWarnings = FALSE, recursive = TRUE)
@@ -329,7 +369,8 @@ app_server <- function(input, output, session) {
   })
 
   # Settings server - FIXED: Changed role to "admin" to show LLM Models tab
-  mod_settings_server("settings", reactive(list(email = "admin@delcampe.com", role = "admin")))
+  # Settings module with authenticated user context
+  mod_settings_server("settings", current_user = reactive(vals$user_data))
 
   # Tracking viewer server
   mod_tracking_viewer_server("tracking_viewer_1")
@@ -340,7 +381,10 @@ app_server <- function(input, output, session) {
   ebay_account_manager <- ebay_auth$account_manager
 
   # eBay Listings Viewer server
-  mod_ebay_listings_server("ebay_listings", ebay_api = ebay_api, session_id = reactive(session$token))
+  mod_ebay_listings_server("ebay_listings",
+                            ebay_api = ebay_api,
+                            session_id = reactive(session$token),
+                            ebay_account_manager = ebay_account_manager)
 
   # ======================================================================
   # eBay STARTUP NOTIFICATION - Proactive Status Alert
@@ -349,7 +393,10 @@ app_server <- function(input, output, session) {
   # Shows user eBay connection status before they navigate to eBay tab
   # No reactive timers - resource efficient approach per user feedback
   observe({
-    # Run once on startup (isolate to prevent reactive dependencies)
+    # IMPORTANT: Wait until user is logged in before showing notification
+    req(vals$login)
+
+    # Run once after login (isolate to prevent reactive dependencies)
     isolate({
       active_account <- ebay_account_manager$get_active_account()
 
