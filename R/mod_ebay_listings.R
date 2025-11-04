@@ -99,7 +99,10 @@ mod_ebay_listings_server <- function(id, ebay_api, session_id, ebay_account_mana
       }
 
       # Fallback to category ID if SKU doesn't help
-      category_num <- as.numeric(category_id)
+      category_num <- suppressWarnings(as.numeric(category_id))
+
+      # If conversion failed, return unknown
+      if (is.na(category_num)) return("-")
 
       # Postcards: 262042 (Topographical), 262043 (Non-Topographical)
       if (category_num %in% c(262042, 262043)) {
