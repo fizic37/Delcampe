@@ -33,7 +33,7 @@ get_db_path <- function() {
     message("Using Docker volume database: ", db_path)
   } else {
     # Local development
-    db_path <- get_db_path()
+    db_path <- "inst/app/data/tracking.sqlite"
     message("Using local development database: ", db_path)
   }
 
