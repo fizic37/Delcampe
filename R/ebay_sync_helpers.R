@@ -655,8 +655,8 @@ format_time_remaining <- function(time_left) {
 
   # Parse ISO 8601 duration
   # P2DT3H30M = 2 days, 3 hours, 30 minutes
-  days <- as.numeric(gsub(".*P([0-9]+)D.*", "\\1", time_left))
-  hours <- as.numeric(gsub(".*T([0-9]+)H.*", "\\1", time_left))
+  days <- suppressWarnings(as.numeric(gsub(".*P([0-9]+)D.*", "\\1", time_left)))
+  hours <- suppressWarnings(as.numeric(gsub(".*T([0-9]+)H.*", "\\1", time_left)))
 
   if (is.na(days)) days <- 0
   if (is.na(hours)) hours <- 0
