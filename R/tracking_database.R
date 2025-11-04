@@ -1444,14 +1444,14 @@ query_sessions <- function(user_id = NULL, limit = 100, start_date = NULL, end_d
     on.exit(DBI::dbDisconnect(con))
     
     query <- "
-      SELECT 
+      SELECT
         s.session_id,
         s.user_id,
         s.session_start,
         s.session_end,
         s.status,
         s.notes,
-        u.username,
+        u.email as username,
         u.email,
         COUNT(i.image_id) as image_count
       FROM sessions s
@@ -1471,8 +1471,8 @@ query_sessions <- function(user_id = NULL, limit = 100, start_date = NULL, end_d
       query <- paste(query, "WHERE", paste(where_conditions, collapse = " AND "))
     }
     
-    query <- paste(query, 
-                   "GROUP BY s.session_id, s.user_id, s.session_start, s.session_end, s.status, s.notes, u.username, u.email",
+    query <- paste(query,
+                   "GROUP BY s.session_id, s.user_id, s.session_start, s.session_end, s.status, s.notes, u.email",
                    "ORDER BY s.session_start DESC LIMIT", limit)
     
     if (length(params) > 0) {
@@ -2201,7 +2201,7 @@ get_tracking_data <- function(date_filter = "", ebay_filter = "") {
         sa.session_id,
         sa.timestamp as session_time,
         s.user_id,
-        u.username,
+        u.email as username,
         i.upload_path
       FROM postal_cards pc
       LEFT JOIN card_processing cp ON pc.card_id = cp.card_id
@@ -2248,7 +2248,7 @@ get_session_tracking_data <- function(date_filter = "", ebay_filter = "") {
         sa.session_id,
         MIN(sa.timestamp) as session_time,
         s.user_id,
-        u.username,
+        u.email as username,
         COUNT(DISTINCT pc.card_id) as cards_processed,
         SUM(CASE WHEN pc.image_type = 'face' THEN 1 ELSE 0 END) as has_face,
         SUM(CASE WHEN pc.image_type = 'verso' THEN 1 ELSE 0 END) as has_verso,
@@ -2266,7 +2266,7 @@ get_session_tracking_data <- function(date_filter = "", ebay_filter = "") {
         AND cp.last_processed IS NOT NULL
         %s
         %s
-      GROUP BY sa.session_id, s.user_id, u.username
+      GROUP BY sa.session_id, s.user_id, u.email
       ORDER BY MIN(sa.timestamp) DESC
     ", date_filter, ebay_filter)
 
