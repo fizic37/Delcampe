@@ -79,7 +79,7 @@ mod_ebay_listings_server <- function(id, ebay_api, session_id, ebay_account_mana
 
     # Database connection helper
     get_db <- function() {
-      DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+      DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     }
 
     # Helper to decode category ID to broad category name

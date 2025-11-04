@@ -101,7 +101,7 @@ authenticate_user <- function(email, password) {
     }
 
     # Open connection
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     # CRITICAL: Always use on.exit for cleanup
     on.exit(DBI::dbDisconnect(con), add = TRUE)
 
@@ -198,7 +198,7 @@ create_user <- function(email, password, role, created_by) {
     }
 
     # Open connection
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con), add = TRUE)
 
     # Check if email already exists
@@ -266,7 +266,7 @@ create_user <- function(email, password, role, created_by) {
 #' @export
 get_user_by_email <- function(email) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con), add = TRUE)
 
     user <- DBI::dbGetQuery(
@@ -323,7 +323,7 @@ update_user_password <- function(email, new_password, current_user_email, curren
       return(list(success = FALSE, message = "New password is required"))
     }
 
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con), add = TRUE)
 
     # Get target user
@@ -397,7 +397,7 @@ update_user_password <- function(email, new_password, current_user_email, curren
 #' @export
 list_users <- function(current_user_role) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con), add = TRUE)
 
     # Query users (exclude password hash for security)
@@ -465,7 +465,7 @@ delete_user <- function(email, current_user_email, current_user_role) {
   }
 
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con), add = TRUE)
 
     # Get target user

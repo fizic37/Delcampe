@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  delcampe-app:
+    build: .
+    image: delcampe-app:latest
+    container_name: delcampe-app
+
+    ports:
+      - "3838:3838"
+
+    volumes:
+      # Mount Hetzner volume for SQLite database
+      - /mnt/delcampe-data:/data
+
+    env_file:
+      - .env.production
+
+    environment:
+      # eBay Environment (production vs sandbox)
+      - EBAY_ENVIRONMENT=${EBAY_ENVIRONMENT:-production}
+
+      # eBay Production OAuth App Credentials
+      # These are the OAuth app credentials, NOT user tokens
+      # User tokens are managed per-user in the database via OAuth flow
+      - EBAY_PROD_CLIENT_ID=${EBAY_PROD_CLIENT_ID}
+      - EBAY_PROD_CLIENT_SECRET=${EBAY_PROD_CLIENT_SECRET}
+      - EBAY_PROD_DEV_ID=${EBAY_PROD_DEV_ID}
+      - EBAY_REDIRECT_URI=${EBAY_REDIRECT_URI}
+
+      # Note: Claude/OpenAI API keys are user-managed
+      # They are stored in the app's data files per user
+      # NOT in environment variables
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3838/"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+    restart: unless-stopped
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

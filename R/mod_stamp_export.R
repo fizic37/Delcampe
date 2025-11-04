@@ -1679,7 +1679,7 @@ mod_stamp_export_server <- function(id, image_paths = reactive(NULL), image_file
                     cat("   Step 2: Looking up stamp_id from stamps table\n")
 
                     # Get stamp_id by hash only (same image can have multiple types)
-                    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+                    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
                     on.exit(DBI::dbDisconnect(con), add = TRUE)
 
                     card_result <- DBI::dbGetQuery(con, "

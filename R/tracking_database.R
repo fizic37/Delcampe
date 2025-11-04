@@ -18,7 +18,32 @@ NULL
 #' @param db_path Path to SQLite database file
 #' @return Database connection status
 #' @export
-initialize_tracking_db <- function(db_path = "inst/app/data/tracking.sqlite") {
+#' Get database path based on environment
+#'
+#' Returns the appropriate database path depending on whether the app
+#' is running in Docker (mounted volume at /data) or local development
+#' (inst/app/data).
+#'
+#' @return Character string with database path
+#' @export
+get_db_path <- function() {
+  # Check if running in Docker with mounted volume
+  if (file.exists("/data")) {
+    db_path <- "/data/tracking.sqlite"
+    message("Using Docker volume database: ", db_path)
+  } else {
+    # Local development
+    db_path <- get_db_path()
+    message("Using local development database: ", db_path)
+  }
+
+  # Create directory if it doesn't exist
+  dir.create(dirname(db_path), recursive = TRUE, showWarnings = FALSE)
+
+  return(db_path)
+}
+
+initialize_tracking_db <- function(db_path = get_db_path()) {
   tryCatch({
     dir.create(dirname(db_path), recursive = TRUE, showWarnings = FALSE)
     con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
@@ -526,7 +551,7 @@ initialize_tracking_db <- function(db_path = "inst/app/data/tracking.sqlite") {
 #' @export
 get_or_create_stamp <- function(file_hash, image_type, original_filename, file_size, dimensions = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
 
     # Check for existing stamp (by hash only - same image file)
@@ -591,7 +616,7 @@ save_stamp_processing <- function(stamp_id, crop_paths = NULL, h_boundaries = NU
                                   v_boundaries = NULL, grid_rows = NULL, grid_cols = NULL, 
                                   extraction_dir = NULL, ai_data = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
 
     # Convert to JSON - use NA_character_ instead of NULL for SQL compatibility
@@ -694,7 +719,7 @@ save_stamp_processing <- function(stamp_id, crop_paths = NULL, h_boundaries = NU
 #' @export
 find_stamp_processing <- function(file_hash, image_type) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
 
 
@@ -794,7 +819,7 @@ save_ebay_stamp_listing <- function(stamp_id, session_id, ebay_item_id, sku, tit
                                     status = "listed", listing_url = NULL, ebay_offer_id = NULL,
                                     ebay_user_id = NULL, ebay_username = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
 
     DBI::dbExecute(con,
@@ -850,7 +875,7 @@ message("✅ Stamp tracking functions loaded!")
 get_or_create_card <- function(file_hash, image_type, original_filename, 
                                file_size = NULL, dimensions = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con), add = TRUE)
     
     # Check if card already exists
@@ -918,7 +943,7 @@ save_card_processing <- function(card_id, crop_paths, h_boundaries, v_boundaries
                                 grid_rows, grid_cols, extraction_dir, 
                                 ai_data = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con), add = TRUE)
     
     # Convert to JSON - ensure single character strings for SQL parameters
@@ -1073,7 +1098,7 @@ save_card_processing <- function(card_id, crop_paths, h_boundaries, v_boundaries
 #' @export
 track_session_activity <- function(session_id, card_id, action, details = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con), add = TRUE)
     
     details_json <- if (!is.null(details)) {
@@ -1107,7 +1132,7 @@ track_session_activity <- function(session_id, card_id, action, details = NULL) 
 #' @export
 find_card_processing <- function(file_hash, image_type) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     result <- DBI::dbGetQuery(con, "
@@ -1209,7 +1234,7 @@ track_image_upload <- function(session_id, user_id, original_filename,
                               file_size = NULL, dimensions = NULL) {
   
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     # Clean parameters
@@ -1378,7 +1403,7 @@ save_uploaded_image <- function(file_info, user_id, session_id, content_category
 #' @export
 start_processing_session <- function(session_id, user_id, session_type = "general") {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     DBI::dbExecute(con, "
@@ -1409,7 +1434,7 @@ start_processing_session <- function(session_id, user_id, session_type = "genera
 #' @export
 ensure_user_exists <- function(user_id, username, email = NULL, role = "user") {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     DBI::dbExecute(con, "
@@ -1440,7 +1465,7 @@ ensure_user_exists <- function(user_id, username, email = NULL, role = "user") {
 #' @export
 query_sessions <- function(user_id = NULL, limit = 100, start_date = NULL, end_date = NULL, session_type = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     query <- "
@@ -1502,7 +1527,7 @@ track_processing_action <- function(image_id, action, user_id,
                                    details = NULL, success = TRUE,
                                    error_message = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     details_json <- NULL
@@ -1540,7 +1565,7 @@ track_processing_action <- function(image_id, action, user_id,
 track_extraction <- function(session_id, image_type, extraction_dir, cropped_paths, 
                            grid_config = NULL, h_boundaries = NULL, v_boundaries = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     image_record <- DBI::dbGetQuery(con, "
@@ -1596,7 +1621,7 @@ track_extraction <- function(session_id, image_type, extraction_dir, cropped_pat
 #' @export
 get_tracking_statistics <- function() {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     total_images <- DBI::dbGetQuery(con, "SELECT COUNT(*) as count FROM images")$count %||% 0
@@ -1644,7 +1669,7 @@ track_ai_extraction <- function(image_id, model, title = NULL, description = NUL
                                condition = NULL, recommended_price = NULL,
                                success = TRUE, error_message = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     # Clean parameters
@@ -1703,7 +1728,7 @@ track_ebay_post <- function(image_id, title, description, price, condition,
                            ebay_listing_id = NULL, status = 'pending',
                            error_message = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     # Clean parameters
@@ -1753,7 +1778,7 @@ track_ebay_post <- function(image_id, title, description, price, condition,
 #' @export
 get_image_by_path <- function(file_path, session_id = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     # Clean the file path - extract just the filename
@@ -1796,7 +1821,7 @@ get_image_by_path <- function(file_path, session_id = NULL) {
 #' @export
 get_ai_extraction_history <- function(image_id) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     result <- DBI::dbGetQuery(con, "
@@ -1829,7 +1854,7 @@ get_ai_extraction_history <- function(image_id) {
 #' @export
 get_posting_statistics <- function(session_id = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     if (!is.null(session_id)) {
@@ -1905,7 +1930,7 @@ get_posting_statistics <- function(session_id = NULL) {
 #' @export
 find_existing_processing <- function(image_hash, image_type = NULL, exclude_image_id = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     # Build query
@@ -2056,7 +2081,7 @@ copy_existing_crops <- function(source_paths, dest_dir) {
 mark_processing_reused <- function(current_session_id, source_session_id, 
                                    image_id, source_image_id) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     # Get user_id from image record
@@ -2120,7 +2145,7 @@ format_timestamp <- function(timestamp) {
 #' @export
 get_hash_for_card <- function(card_id) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
 
     result <- DBI::dbGetQuery(con, "
@@ -2148,7 +2173,7 @@ get_system_info <- function() {
   list(
     version = "3.1.0-deduplication",
     system = "Extended SQLite Tracking with AI, eBay & Deduplication Support",
-    database_path = "inst/app/data/tracking.sqlite",
+    database_path = get_db_path(),
     features = c("AI Extraction Tracking", "eBay Posting Tracking", "Image Upload Tracking", "Image Deduplication"),
     new_tables = c("ai_extractions", "ebay_posts"),
     load_status = "working"
@@ -2172,7 +2197,7 @@ message("ℹ️ Deduplication functions: find_existing_processing, validate_exis
 #' @export
 get_tracking_data <- function(date_filter = "", ebay_filter = "") {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con), add = TRUE)
 
     query <- sprintf("
@@ -2240,7 +2265,7 @@ get_tracking_data <- function(date_filter = "", ebay_filter = "") {
 #' @export
 get_session_tracking_data <- function(date_filter = "", ebay_filter = "") {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con), add = TRUE)
 
     query <- sprintf("
@@ -2288,7 +2313,7 @@ get_session_tracking_data <- function(date_filter = "", ebay_filter = "") {
 #' @export
 get_session_cards <- function(session_id) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con), add = TRUE)
 
     # Get ALL cards involved in this session, regardless of action type

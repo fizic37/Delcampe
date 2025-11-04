@@ -3,7 +3,7 @@
 
 #' Initialize eBay listings table
 #' @export
-initialize_ebay_tables <- function(db_path = "inst/app/data/tracking.sqlite") {
+initialize_ebay_tables <- function(db_path = get_db_path()) {
   tryCatch({
     con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
     on.exit(DBI::dbDisconnect(con))
@@ -151,7 +151,7 @@ initialize_ebay_tables <- function(db_path = "inst/app/data/tracking.sqlite") {
 #'
 #' @return TRUE if successful, FALSE otherwise
 #' @export
-initialize_ebay_cache_table <- function(db_path = "inst/app/data/tracking.sqlite") {
+initialize_ebay_cache_table <- function(db_path = get_db_path()) {
   tryCatch({
     con <- DBI::dbConnect(RSQLite::SQLite(), db_path)
     on.exit(DBI::dbDisconnect(con))
@@ -234,7 +234,7 @@ save_ebay_listing <- function(card_id, session_id, ebay_item_id = NULL,
                               watch_count = 0, view_count = 0, bid_count = 0,
                               current_price = NULL, time_remaining = NULL, last_synced_at = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     # Convert aspects to JSON if provided
@@ -330,7 +330,7 @@ save_ebay_listing <- function(card_id, session_id, ebay_item_id = NULL,
 #' @export
 get_ebay_listing_for_card <- function(card_id) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     result <- DBI::dbGetQuery(con, "
@@ -360,7 +360,7 @@ get_ebay_listing_for_card <- function(card_id) {
 #' @export  
 update_ebay_listing_status <- function(sku, status, error_message = NULL) {
   tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
     
     DBI::dbExecute(con, "

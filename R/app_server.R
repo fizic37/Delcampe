@@ -24,7 +24,7 @@ app_server <- function(input, output, session) {
 📊 Initializing tracking database...
 ")
   db_initialized <- tryCatch({
-    initialize_tracking_db("inst/app/data/tracking.sqlite")
+    initialize_tracking_db(get_db_path())
   }, error = function(e) {
     cat("⚠️ Failed to initialize database:", e$message, "
 ")
@@ -36,14 +36,14 @@ app_server <- function(input, output, session) {
 
     # Initialize eBay tables (includes api_type migration)
     tryCatch({
-      initialize_ebay_tables("inst/app/data/tracking.sqlite")
+      initialize_ebay_tables(get_db_path())
     }, error = function(e) {
       cat("⚠️ Failed to initialize eBay tables:", e$message, "\n")
     })
 
     # Initialize eBay listings cache table (API-only data)
     tryCatch({
-      initialize_ebay_cache_table("inst/app/data/tracking.sqlite")
+      initialize_ebay_cache_table(get_db_path())
     }, error = function(e) {
       cat("⚠️ Failed to initialize eBay cache table:", e$message, "\n")
     })

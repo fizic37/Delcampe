@@ -1,0 +1,65 @@
+# Version Control
+.git
+.gitignore
+.github
+
+# R Project Files
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Documentation
+docs/
+PRPs/
+TASK_PRP/
+*.md
+!DESCRIPTION
+!NAMESPACE
+
+# Test Files
+tests/
+test_images/
+
+# Development
+dev/
+.Rbuildignore
+
+# Database Files (will be on volume)
+inst/app/data/*.sqlite
+inst/app/data/*.sqlite-journal
+inst/app/data/*.db
+
+# Python Virtual Environment
+venv_proj/
+__pycache__/
+*.pyc
+*.pyo
+
+# Secrets and Environment Files
+.env
+.env.*
+.Renviron
+.Renviron.*
+!.env.production.template
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Backups
+*.backup
+*~
+
+# Logs
+*.log
+
+# MCP and Claude
+.mcp.json
+.claude/
+.serena/
+
+# Misc
+.here

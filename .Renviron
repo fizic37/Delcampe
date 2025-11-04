@@ -1,0 +1,45 @@
+# eBay API Credentials
+# Replace these with your actual credentials from eBay Developer Program
+
+# Sandbox Environment (for testing)
+# App ID from eBay = Client ID in OAuth terms
+EBAY_SANDBOX_CLIENT_ID="TITAMARI-Delcampe-SBX-bc56da498-cb3af316"
+# Cert ID from eBay = Client Secret in OAuth terms
+EBAY_SANDBOX_CLIENT_SECRET="SBX-c5a2801e6642-1a7a-43bd-9f16-8ac8"
+# Dev ID (optional, for legacy APIs)
+EBAY_SANDBOX_DEV_ID="f31d6100-687c-483f-b762-a0d486e12a68"
+
+# Production Environment (for live listings)
+# IMPORTANT: Production credentials are NOT stored here for security
+# In Docker deployment, these are set via .env.production (not in git)
+# In local development, you can set them in .Renviron.local (gitignored)
+#
+# Production credentials are managed as:
+# - Docker: Set EBAY_PROD_* in .env.production on the server
+# - Local: Create .Renviron.local with production credentials (optional)
+#
+# The values below are just templates to show the format:
+# EBAY_PROD_CLIENT_ID="your-app-name-PRD-xxxxx-xxxxx"
+# EBAY_PROD_CLIENT_SECRET="PRD-xxxxx-xxxxx-xxxxx-xxxxx"
+# EBAY_PROD_DEV_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# eBay Redirect URI - USE THE RuName, NOT A URL!
+# This RuName has OAuth enabled (verified from developer portal)
+EBAY_REDIRECT_URI=TITA_MARIUS-TITAMARI-Delcam-njpondg
+
+# eBay Business Policy IDs (get these from your eBay Seller Hub)
+# Leave these commented out until you have real policy IDs
+EBAY_FULFILLMENT_POLICY_ID=252616246010
+EBAY_PAYMENT_POLICY_ID=206693427010
+EBAY_RETURN_POLICY_ID=208331180010
+
+# eBay Inventory Location (MUST match your eBay account registration address)
+# CRITICAL: These values must EXACTLY match the address where your eBay account is registered
+# Otherwise you'll get "overseas warehouse" errors when creating listings
+# Common country codes: US, GB, DE, FR, IT, ES, RO, etc.
+# EBAY_LOCATION_KEY=default_location  # Set this if you have a specific location key to use
+
+IMGBB_API_KEY=de11bdd00cc25a50f33eb7c201232b0c
+
+# Default eBay Environment (sandbox or production)
+EBAY_ENVIRONMENT=production

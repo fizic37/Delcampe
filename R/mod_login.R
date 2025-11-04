@@ -245,7 +245,7 @@ mod_login_server <- function(id, vals){
 
               # Create session record in database for eBay integration
               tryCatch({
-                con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+                con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
                 on.exit(DBI::dbDisconnect(con), add = TRUE)
 
                 # Get user_id for this user (should be same as id after migration)

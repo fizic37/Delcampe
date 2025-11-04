@@ -60,6 +60,9 @@ coverage-report.html
 
 # Credentials and secrets (NEVER commit these!)
 .Renviron
+.Renviron.local
+.env.production
+.env.local
 Ebay_Credentials.*
 data/ebay_tokens.rds
 data/ebay_tokens.rds.backup

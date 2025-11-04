@@ -1301,7 +1301,7 @@ mod_delcampe_export_server <- function(id, image_paths = reactive(NULL), image_f
 
                     # First, get card_id from postal_cards directly (not using find_card_processing)
                     # because combined images may not have a card_processing record yet
-                    con <- DBI::dbConnect(RSQLite::SQLite(), "inst/app/data/tracking.sqlite")
+                    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
                     on.exit(DBI::dbDisconnect(con), add = TRUE)
 
                     card_result <- DBI::dbGetQuery(con, "
