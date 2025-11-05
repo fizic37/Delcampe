@@ -4,7 +4,7 @@
 \alias{initialize_ebay_cache_table}
 \title{Initialize eBay Listings Cache Table}
 \usage{
-initialize_ebay_cache_table(db_path = "inst/app/data/tracking.sqlite")
+initialize_ebay_cache_table(db_path = NULL)
 }
 \arguments{
 \item{db_path}{Path to SQLite database}

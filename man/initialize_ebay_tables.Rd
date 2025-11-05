@@ -4,7 +4,7 @@
 \alias{initialize_ebay_tables}
 \title{Initialize eBay listings table}
 \usage{
-initialize_ebay_tables(db_path = "inst/app/data/tracking.sqlite")
+initialize_ebay_tables(db_path = NULL)
 }
 \description{
 Initialize eBay listings table

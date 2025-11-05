@@ -68,6 +68,7 @@ RUN echo "run_as shiny;" > /etc/shiny-server/shiny-server.conf \
 # Set proper permissions
 RUN chown -R shiny:shiny /srv/shiny-server/delcampe \
     && chown -R shiny:shiny /var/log/shiny-server \
+    && chown -R shiny:shiny /data \
     && chmod -R 755 /srv/shiny-server/delcampe
 
 # Expose port
