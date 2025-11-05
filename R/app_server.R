@@ -134,7 +134,34 @@ app_server <- function(input, output, session) {
     
     cat("✅ Wrapper functions created\n\n")
   }
-  
+
+  # ==================== PYTHON DIAGNOSTICS ====================
+  # Log Python configuration for production debugging
+  # Helps verify RETICULATE_PYTHON environment variable works in Docker
+  cat("\n📋 Python Configuration:\n")
+
+  tryCatch({
+    py_cfg <- reticulate::py_config()
+    cat("  Environment: RETICULATE_PYTHON =", Sys.getenv("RETICULATE_PYTHON"), "\n")
+    cat("  Python version:", py_cfg$version, "\n")
+    cat("  Python executable:", py_cfg$python, "\n")
+
+    if (!is.null(py_cfg$virtualenv)) {
+      cat("  Virtual environment:", py_cfg$virtualenv, "\n")
+    } else {
+      cat("  Virtual environment: [none - using system Python]\n")
+    }
+
+    # Critical dependencies check
+    cat("  OpenCV available:", reticulate::py_module_available("cv2"), "\n")
+    cat("  NumPy available:", reticulate::py_module_available("numpy"), "\n")
+    cat("\n")
+
+  }, error = function(e) {
+    cat("  ⚠️ Could not retrieve Python configuration:", e$message, "\n\n")
+  })
+  # ===========================================================
+
   # Initialize application-wide reactive values
   app_rv <- reactiveValues(
     # Individual extraction status
