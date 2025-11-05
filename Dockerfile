@@ -71,6 +71,28 @@ RUN chown -R shiny:shiny /srv/shiny-server/delcampe \
     && chown -R shiny:shiny /data \
     && chmod -R 755 /srv/shiny-server/delcampe
 
+# Create startup script to generate .Renviron from environment variables
+# This ensures R can read credentials from Sys.getenv()
+RUN echo '#!/bin/bash' > /usr/local/bin/start-shiny.sh \
+    && echo 'echo "Creating .Renviron from environment variables..."' >> /usr/local/bin/start-shiny.sh \
+    && echo 'cat > /srv/shiny-server/delcampe/.Renviron <<EOF' >> /usr/local/bin/start-shiny.sh \
+    && echo 'EBAY_ENVIRONMENT=${EBAY_ENVIRONMENT}' >> /usr/local/bin/start-shiny.sh \
+    && echo 'EBAY_PROD_CLIENT_ID=${EBAY_PROD_CLIENT_ID}' >> /usr/local/bin/start-shiny.sh \
+    && echo 'EBAY_PROD_CLIENT_SECRET=${EBAY_PROD_CLIENT_SECRET}' >> /usr/local/bin/start-shiny.sh \
+    && echo 'EBAY_PROD_CERT_ID=${EBAY_PROD_CERT_ID}' >> /usr/local/bin/start-shiny.sh \
+    && echo 'EBAY_PROD_DEV_ID=${EBAY_PROD_DEV_ID}' >> /usr/local/bin/start-shiny.sh \
+    && echo 'EBAY_REDIRECT_URI=${EBAY_REDIRECT_URI}' >> /usr/local/bin/start-shiny.sh \
+    && echo 'EBAY_SANDBOX_CLIENT_ID=${EBAY_SANDBOX_CLIENT_ID}' >> /usr/local/bin/start-shiny.sh \
+    && echo 'EBAY_SANDBOX_CLIENT_SECRET=${EBAY_SANDBOX_CLIENT_SECRET}' >> /usr/local/bin/start-shiny.sh \
+    && echo 'EBAY_SANDBOX_CERT_ID=${EBAY_SANDBOX_CERT_ID}' >> /usr/local/bin/start-shiny.sh \
+    && echo 'EBAY_SANDBOX_DEV_ID=${EBAY_SANDBOX_DEV_ID}' >> /usr/local/bin/start-shiny.sh \
+    && echo 'EOF' >> /usr/local/bin/start-shiny.sh \
+    && echo 'chown shiny:shiny /srv/shiny-server/delcampe/.Renviron' >> /usr/local/bin/start-shiny.sh \
+    && echo 'chmod 600 /srv/shiny-server/delcampe/.Renviron' >> /usr/local/bin/start-shiny.sh \
+    && echo 'echo ".Renviron created successfully"' >> /usr/local/bin/start-shiny.sh \
+    && echo 'exec /usr/bin/shiny-server' >> /usr/local/bin/start-shiny.sh \
+    && chmod +x /usr/local/bin/start-shiny.sh
+
 # Expose port
 EXPOSE 3838
 
@@ -78,5 +100,5 @@ EXPOSE 3838
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:3838/ || exit 1
 
-# Start Shiny Server
-CMD ["/usr/bin/shiny-server"]
+# Start Shiny Server via startup script
+CMD ["/usr/local/bin/start-shiny.sh"]
