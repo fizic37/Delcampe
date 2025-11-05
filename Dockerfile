@@ -50,6 +50,9 @@ RUN python3 -m venv venv_proj \
     && ./venv_proj/bin/pip install --upgrade pip \
     && ./venv_proj/bin/pip install opencv-python numpy
 
+# Install the Delcampe package (must be after COPY . .)
+RUN R CMD INSTALL --no-multiarch --with-keep.source .
+
 # Create /data mount point for volume
 RUN mkdir -p /data \
     && chmod 755 /data
@@ -86,6 +89,7 @@ RUN echo '#!/bin/bash' > /usr/local/bin/start-shiny.sh \
     && echo 'EBAY_SANDBOX_CLIENT_SECRET=${EBAY_SANDBOX_CLIENT_SECRET}' >> /usr/local/bin/start-shiny.sh \
     && echo 'EBAY_SANDBOX_CERT_ID=${EBAY_SANDBOX_CERT_ID}' >> /usr/local/bin/start-shiny.sh \
     && echo 'EBAY_SANDBOX_DEV_ID=${EBAY_SANDBOX_DEV_ID}' >> /usr/local/bin/start-shiny.sh \
+    && echo 'RETICULATE_PYTHON=/srv/shiny-server/delcampe/venv_proj/bin/python' >> /usr/local/bin/start-shiny.sh \
     && echo 'EOF' >> /usr/local/bin/start-shiny.sh \
     && echo 'chown shiny:shiny /srv/shiny-server/delcampe/.Renviron' >> /usr/local/bin/start-shiny.sh \
     && echo 'chmod 600 /srv/shiny-server/delcampe/.Renviron' >> /usr/local/bin/start-shiny.sh \
