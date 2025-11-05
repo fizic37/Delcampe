@@ -54,18 +54,10 @@ initialize_tracking_db <- function(db_path = NULL) {
     DBI::dbExecute(con, "PRAGMA journal_mode = WAL")
     
     # ========== EXISTING TABLES ==========
-    
-    # Users table
-    DBI::dbExecute(con, "
-      CREATE TABLE IF NOT EXISTS users (
-        user_id TEXT PRIMARY KEY,
-        username TEXT NOT NULL,
-        email TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        last_login DATETIME
-      )
-    ")
-    
+
+    # Users table - Now handled by authentication system migration (see lines 425-488)
+    # The new schema uses: id INTEGER PRIMARY KEY, email TEXT UNIQUE, password_hash TEXT, role TEXT, etc.
+
     # Sessions table
     DBI::dbExecute(con, "
       CREATE TABLE IF NOT EXISTS sessions (
@@ -1406,20 +1398,16 @@ start_processing_session <- function(session_id, user_id, session_type = "genera
   tryCatch({
     con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
     on.exit(DBI::dbDisconnect(con))
-    
+
+    # Users are managed by authentication system, just create the session
     DBI::dbExecute(con, "
-      INSERT OR IGNORE INTO users (user_id, username) 
-      VALUES (?, ?)
-    ", list(as.character(user_id), paste0("user_", user_id)))
-    
-    DBI::dbExecute(con, "
-      INSERT OR REPLACE INTO sessions (session_id, user_id) 
+      INSERT OR REPLACE INTO sessions (session_id, user_id)
       VALUES (?, ?)
     ", list(as.character(session_id), as.character(user_id)))
-    
+
     message("✅ Session started: ", session_id)
     return(session_id)
-    
+
   }, error = function(e) {
     message("❌ Error starting session: ", e$message)
     return(session_id)
@@ -1433,27 +1421,12 @@ start_processing_session <- function(session_id, user_id, session_type = "genera
 #' @param role User role
 #' @return User ID
 #' @export
+#' @note DEPRECATED - User management now handled by authentication system
 ensure_user_exists <- function(user_id, username, email = NULL, role = "user") {
-  tryCatch({
-    con <- DBI::dbConnect(RSQLite::SQLite(), get_db_path())
-    on.exit(DBI::dbDisconnect(con))
-    
-    DBI::dbExecute(con, "
-      INSERT OR IGNORE INTO users (user_id, username, email) 
-      VALUES (?, ?, ?)
-    ", list(as.character(user_id), as.character(username), email))
-    
-    DBI::dbExecute(con, "
-      UPDATE users SET last_login = CURRENT_TIMESTAMP 
-      WHERE user_id = ?
-    ", list(as.character(user_id)))
-    
-    return(user_id)
-    
-  }, error = function(e) {
-    message("❌ Error in ensure_user_exists: ", e$message)
-    return(user_id)
-  })
+  # DEPRECATED: Users are now managed by the authentication system (R/auth_system.R)
+  # This function is kept for backward compatibility but does nothing
+  warning("ensure_user_exists() is deprecated. Users are managed by authentication system.")
+  return(user_id)
 }
 
 #' Query sessions
