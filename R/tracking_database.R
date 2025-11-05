@@ -1481,7 +1481,7 @@ query_sessions <- function(user_id = NULL, limit = 100, start_date = NULL, end_d
         u.email,
         COUNT(i.image_id) as image_count
       FROM sessions s
-      LEFT JOIN users u ON s.user_id = u.user_id
+      LEFT JOIN users u ON s.user_id = u.id
       LEFT JOIN images i ON s.session_id = i.session_id
     "
     
@@ -2234,7 +2234,7 @@ get_tracking_data <- function(date_filter = "", ebay_filter = "") {
       LEFT JOIN ebay_listings el ON pc.card_id = el.card_id
       LEFT JOIN session_activity sa ON pc.card_id = sa.card_id AND sa.action = 'processed'
       LEFT JOIN sessions s ON sa.session_id = s.session_id
-      LEFT JOIN users u ON s.user_id = u.user_id
+      LEFT JOIN users u ON s.user_id = u.id
       LEFT JOIN (
         SELECT file_hash, upload_path, upload_timestamp,
                ROW_NUMBER() OVER (PARTITION BY file_hash ORDER BY upload_timestamp DESC) as rn
@@ -2284,7 +2284,7 @@ get_session_tracking_data <- function(date_filter = "", ebay_filter = "") {
         MAX(el.status) as ebay_status
       FROM session_activity sa
       LEFT JOIN sessions s ON sa.session_id = s.session_id
-      LEFT JOIN users u ON s.user_id = u.user_id
+      LEFT JOIN users u ON s.user_id = u.id
       LEFT JOIN postal_cards pc ON sa.card_id = pc.card_id
       LEFT JOIN card_processing cp ON pc.card_id = cp.card_id
       LEFT JOIN ebay_listings el ON pc.card_id = el.card_id
